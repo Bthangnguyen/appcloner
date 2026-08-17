@@ -125,21 +125,24 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // Đồng bộ hóa Package Name trong resources.arsc để không bị crash khi mở
+                    // resources.arsc: GIỮ NGUYÊN 100% package gốc!
+                    // Lý do: R.class trong DEX bytecode đã hardcode resource ID (0x7fXXYYZZ)
+                    // liên kết với package name gốc trong bảng tài nguyên.
+                    // Nếu đổi package trong ARSC -> AssetManager không map được R.id -> crash ngay!
+                    // Manifest package (Application ID) và ARSC package (Resource Table) có thể khác nhau.
                     entryName == "resources.arsc" -> {
                         val arscBytes = baseZip.getInputStream(entry).use { it.readBytes() }
-                        val modifiedArsc = ArscEditor.modifyPackageName(arscBytes, config.originalPackageName, config.newPackageName)
 
                         val newEntry = ZipEntry(entryName)
                         newEntry.method = ZipEntry.STORED
-                        newEntry.size = modifiedArsc.size.toLong()
-                        newEntry.compressedSize = modifiedArsc.size.toLong()
+                        newEntry.size = arscBytes.size.toLong()
+                        newEntry.compressedSize = arscBytes.size.toLong()
                         val crc = CRC32()
-                        crc.update(modifiedArsc)
+                        crc.update(arscBytes)
                         newEntry.crc = crc.value
 
                         zipOut.putNextEntry(newEntry)
-                        zipOut.write(modifiedArsc)
+                        zipOut.write(arscBytes)
                         zipOut.closeEntry()
                     }
 
