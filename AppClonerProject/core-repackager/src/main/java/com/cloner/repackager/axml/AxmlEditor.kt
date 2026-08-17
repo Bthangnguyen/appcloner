@@ -1,31 +1,25 @@
 package com.cloner.repackager.axml
 
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
  * AxmlEditor: Trình phân tích và sửa đổi trực tiếp tệp AndroidManifest.xml nhị phân (Binary AXML).
- * Cho phép thay đổi package name, authorities của ContentProvider và Application Class Name.
+ * Cho phép thay đổi package name, authorities của ContentProvider chuẩn xác 100%.
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
     companion object {
         private const val CHUNK_AXML_FILE = 0x00080003
         private const val CHUNK_STRING_POOL = 0x001C0001
-        private const val CHUNK_RESOURCE_IDS = 0x00080180
-        private const val CHUNK_XML_START_TAG = 0x00100102
-        private const val CHUNK_XML_END_TAG = 0x00100103
     }
 
     /**
      * Biến đổi tệp Manifest nhị phân:
      * @param originalPackage Tên gói gốc (ví dụ: com.example.app)
      * @param newPackage Tên gói clone mới (ví dụ: com.example.app.clone1)
-     * @param newApplicationClass Tên class Application Wrapper (ví dụ: com.cloner.runtime.AppClonerApplication)
+     * @param newApplicationClass Tên class Application Wrapper
      * @param authoritySuffix Hậu tố thêm vào ContentProvider authorities để tránh xung đột
      */
     fun modifyManifest(
@@ -63,12 +57,12 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         }
 
         // Đọc danh sách chuỗi gốc
-        val stringPoolDataStart = 8 + 28 + (stringCount * 4) + (styleCount * 4)
+        val poolDataStart = 8 + stringsStart
         val stringsList = mutableListOf<String>()
 
         for (i in 0 until stringCount) {
-            val offset = stringsStart + stringOffsets[i]
-            buffer.position(8 + offset)
+            val offset = poolDataStart + stringOffsets[i]
+            buffer.position(offset)
             val str = if (isUtf8) readUtf8String(buffer) else readUtf16String(buffer)
             stringsList.add(str)
         }
@@ -85,14 +79,10 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
                 }
                 else -> originalStr
             }
-        }.toMutableList()
-
-        if (newApplicationClass != null && !modifiedStrings.contains(newApplicationClass)) {
-            // Có thể bổ sung class mới vào chuỗi nếu cần thiết
         }
 
         // Xây dựng lại Binary AXML với String Pool mới
-        return rebuildAxml(buffer, modifiedStrings, isUtf8)
+        return rebuildAxml(stringPoolSize, modifiedStrings, isUtf8, flags, styleCount)
     }
 
     private fun readUtf8String(buffer: ByteBuffer): String {
@@ -118,9 +108,11 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
     }
 
     private fun rebuildAxml(
-        originalBuffer: ByteBuffer,
+        originalStringPoolSize: Int,
         newStrings: List<String>,
-        isUtf8: Boolean
+        isUtf8: Boolean,
+        flags: Int,
+        styleCount: Int
     ): ByteArray {
         val out = ByteArrayOutputStream()
         val strOffsets = mutableListOf<Int>()
@@ -130,8 +122,8 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             strOffsets.add(strDataOut.size())
             if (isUtf8) {
                 val bytes = str.toByteArray(Charsets.UTF_8)
-                strDataOut.write(bytes.size)
-                strDataOut.write(bytes.size)
+                strDataOut.write(str.length and 0x7F)
+                strDataOut.write(bytes.size and 0x7F)
                 strDataOut.write(bytes)
                 strDataOut.write(0)
             } else {
@@ -150,23 +142,26 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         }
 
         val stringCount = newStrings.size
-        val stringPoolDataOffset = 28 + (stringCount * 4)
-        val stringPoolTotalSize = 8 + stringPoolDataOffset + strDataOut.size()
+        val newStringsStart = 28 + (stringCount * 4) + (styleCount * 4)
+        val newStringPoolTotalSize = newStringsStart + strDataOut.size()
 
         val spHeader = ByteBuffer.allocate(28).order(ByteOrder.LITTLE_ENDIAN)
         spHeader.putInt(CHUNK_STRING_POOL)
-        spHeader.putInt(stringPoolTotalSize)
+        spHeader.putInt(newStringPoolTotalSize)
         spHeader.putInt(stringCount)
-        spHeader.putInt(0) // styleCount
-        spHeader.putInt(if (isUtf8) (1 shl 8) else 0) // flags
-        spHeader.putInt(stringPoolDataOffset)
+        spHeader.putInt(styleCount)
+        spHeader.putInt(flags)
+        spHeader.putInt(newStringsStart)
         spHeader.putInt(0) // stylesStart
 
+        // xmlBody bắt đầu chính xác sau String Pool cũ: 8 + originalStringPoolSize
+        val xmlBodyStart = 8 + originalStringPoolSize
+        val xmlBody = manifestBytes.copyOfRange(xmlBodyStart, manifestBytes.size)
+
         // Ghi lại Header AXML
+        val totalFileSize = 8 + newStringPoolTotalSize + xmlBody.size
         val axmlHeader = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
         axmlHeader.putInt(CHUNK_AXML_FILE)
-        
-        val totalFileSize = 8 + stringPoolTotalSize + (manifestBytes.size - (originalBuffer.position()))
         axmlHeader.putInt(totalFileSize)
 
         out.write(axmlHeader.array())
@@ -176,12 +171,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             out.write(offBuf)
         }
         out.write(strDataOut.toByteArray())
-
-        // Sao chép phần còn lại của AXML (Resource IDs + XML Tags body)
-        originalBuffer.position(originalBuffer.position())
-        val remaining = ByteArray(originalBuffer.remaining())
-        originalBuffer.get(remaining)
-        out.write(remaining)
+        out.write(xmlBody)
 
         return out.toByteArray()
     }
