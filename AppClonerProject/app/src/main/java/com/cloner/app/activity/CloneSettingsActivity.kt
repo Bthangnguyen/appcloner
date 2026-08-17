@@ -175,13 +175,13 @@ class CloneSettingsActivity : Activity() {
         }
     }
 
-    private fun getPublicCloneDir(): File {
-        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val cloneDir = File(downloadDir, "AppCloner")
-        if (!cloneDir.exists()) {
-            cloneDir.mkdirs()
+    private fun getStorageCloneDir(): File {
+        // Thư mục lưu trữ an toàn 100% không bao giờ bị lỗi quyền EACCES trên mọi Android 11, 12, 13, 14
+        val dir = getExternalFilesDir("clones") ?: File(filesDir, "clones")
+        if (!dir.exists()) {
+            dir.mkdirs()
         }
-        return if (cloneDir.exists() && cloneDir.canWrite()) cloneDir else (getExternalFilesDir("clones") ?: filesDir)
+        return dir
     }
 
     private fun startCloneProcess() {
@@ -231,7 +231,7 @@ class CloneSettingsActivity : Activity() {
         Thread {
             try {
                 val srcApk = File(appInfo.sourceDir)
-                val outDir = getPublicCloneDir()
+                val outDir = getStorageCloneDir()
                 val outApk = File(outDir, "${config.newPackageName}.apk")
 
                 val pipeline = ClonePipeline(config)
@@ -265,7 +265,7 @@ class CloneSettingsActivity : Activity() {
     private fun showCloneSuccessDialog(apkFile: File, appName: String) {
         AlertDialog.Builder(this)
             .setTitle(" Nhân bản Thành công!")
-            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\n📁 Vị trí lưu file:\nThư mục: Download / AppCloner /\nTên tệp: ${apkFile.name}\n\nBạn có muốn cài đặt ứng dụng vừa nhân bản ngay bây giờ không?")
+            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\nTệp APK đã sẵn sàng để cài đặt.\n\nBạn có muốn cài đặt ứng dụng vừa nhân bản ngay bây giờ không?")
             .setPositiveButton(" CÀI ĐẶT NGAY") { _, _ ->
                 installApk(apkFile)
             }
