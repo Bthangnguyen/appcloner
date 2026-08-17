@@ -1,9 +1,11 @@
 package com.cloner.repackager
 
+import com.cloner.repackager.arsc.ArscEditor
 import com.cloner.repackager.axml.AxmlEditor
 import com.cloner.repackager.dex.DexClassParser
 import com.cloner.repackager.signer.ApkSignerHelper
 import java.io.*
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -38,6 +40,7 @@ data class CloneConfig(
 
 /**
  * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK.
+ * Đồng bộ hóa toàn diện: AndroidManifest nhị phân + resources.arsc + Split APKs + Chữ ký kép v1/v2.
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -91,7 +94,7 @@ class ClonePipeline(private val config: CloneConfig) {
             val buffer = ByteArray(8192)
             val addedEntries = HashSet<String>()
 
-            listener?.onProgress("Đang tái cấu trúc AndroidManifest & thay đổi Icon...", 30)
+            listener?.onProgress("Đang tái cấu trúc AndroidManifest, resources.arsc & Icon...", 30)
 
             // Bước 2: Tái tạo Base APK
             baseEntries = baseZip.entries()
@@ -101,6 +104,7 @@ class ClonePipeline(private val config: CloneConfig) {
                 addedEntries.add(entryName)
 
                 when {
+                    // Xử lý AndroidManifest.xml nhị phân
                     entryName == "AndroidManifest.xml" -> {
                         val manifestBytes = baseZip.getInputStream(entry).use { it.readBytes() }
                         val editor = AxmlEditor(manifestBytes)
@@ -117,6 +121,25 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
+                    // Đồng bộ hóa Package Name trong resources.arsc để không bị crash khi mở
+                    entryName == "resources.arsc" -> {
+                        val arscBytes = baseZip.getInputStream(entry).use { it.readBytes() }
+                        val modifiedArsc = ArscEditor.modifyPackageName(arscBytes, config.originalPackageName, config.newPackageName)
+
+                        val newEntry = ZipEntry(entryName)
+                        newEntry.method = ZipEntry.STORED
+                        newEntry.size = modifiedArsc.size.toLong()
+                        newEntry.compressedSize = modifiedArsc.size.toLong()
+                        val crc = CRC32()
+                        crc.update(modifiedArsc)
+                        newEntry.crc = crc.value
+
+                        zipOut.putNextEntry(newEntry)
+                        zipOut.write(modifiedArsc)
+                        zipOut.closeEntry()
+                    }
+
+                    // Thay thế biểu tượng Icon khi có yêu cầu đổi màu
                     config.modifiedIconBytes != null && (entryName.contains("ic_launcher") || entryName.contains("icon")) && entryName.endsWith(".png") -> {
                         val newEntry = ZipEntry(entryName)
                         zipOut.putNextEntry(newEntry)
@@ -124,10 +147,12 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
+                    // Bỏ qua chữ ký cũ
                     entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF") || entryName.endsWith(".DSA")) -> {
-                        // Bỏ qua chữ ký cũ
+                        // Bỏ qua
                     }
 
+                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs)
                     else -> {
                         val newEntry = ZipEntry(entryName)
                         if (entry.method == ZipEntry.STORED) {
