@@ -5,8 +5,8 @@ import java.nio.ByteOrder
 
 /**
  * ArscEditor: Trình chỉnh sửa tệp tài nguyên nhị phân resources.arsc.
- * Đồng bộ hóa Package Name trong resources.arsc khớp với package name clone mới,
- * giúp ngăn chặn hoàn toàn lỗi văng app (Resources$NotFoundException) khi app khởi chạy.
+ * Định vị chính xác khối ResTable_package (Chunk 0x0200) và cập nhật Package Name,
+ * giải quyết triệt để lỗi văng app (Resources$NotFoundException) khi app clone khởi chạy.
  */
 object ArscEditor {
 
@@ -14,25 +14,36 @@ object ArscEditor {
 
     fun modifyPackageName(arscBytes: ByteArray, oldPackage: String, newPackage: String): ByteArray {
         val result = arscBytes.clone()
-        var idx = 0
+        if (result.size < 12) return result
 
-        while (idx < result.size - 268) {
-            val chunkType = ByteBuffer.wrap(result, idx, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
-            val chunkSize = ByteBuffer.wrap(result, idx + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val buf = ByteBuffer.wrap(result).order(ByteOrder.LITTLE_ENDIAN)
+        val rootType = buf.getShort(0).toInt() and 0xFFFF
+        val rootHeaderSize = buf.getShort(2).toInt() and 0xFFFF
+        if (rootType != 0x0002) return result
+
+        // StringPool chunk bắt đầu ngay sau root header
+        if (rootHeaderSize + 8 > result.size) return result
+        val spSize = buf.getInt(rootHeaderSize + 4)
+
+        // Package chunk đầu tiên bắt đầu tại rootHeaderSize + spSize
+        var pkgOffset = rootHeaderSize + spSize
+
+        while (pkgOffset < result.size - 268) {
+            val chunkType = buf.getShort(pkgOffset).toInt() and 0xFFFF
+            val pkgChunkSize = buf.getInt(pkgOffset + 4)
 
             if (chunkType == RES_TABLE_PACKAGE_TYPE) {
-                // Đọc 256 bytes UTF-16LE của tên package
+                // Đọc 256 bytes UTF-16LE của tên package tại pkgOffset + 12
                 val pkgNameChars = CharArray(128)
-                val buf = ByteBuffer.wrap(result, idx + 12, 256).order(ByteOrder.LITTLE_ENDIAN)
+                val readBuf = ByteBuffer.wrap(result, pkgOffset + 12, 256).order(ByteOrder.LITTLE_ENDIAN)
                 for (c in 0 until 128) {
-                    pkgNameChars[c] = buf.char
+                    pkgNameChars[c] = readBuf.char
                 }
                 val currentPkgName = String(pkgNameChars).trimEnd('\u0000')
 
-                if (currentPkgName == oldPackage) {
-                    // Ghi đè package name mới vào đúng bộ đệm 256 bytes
+                if (currentPkgName == oldPackage || currentPkgName.startsWith(oldPackage)) {
                     val newChars = newPackage.toCharArray()
-                    val writeBuf = ByteBuffer.wrap(result, idx + 12, 256).order(ByteOrder.LITTLE_ENDIAN)
+                    val writeBuf = ByteBuffer.wrap(result, pkgOffset + 12, 256).order(ByteOrder.LITTLE_ENDIAN)
                     for (c in 0 until 128) {
                         if (c < newChars.size) {
                             writeBuf.putChar(newChars[c])
@@ -43,11 +54,8 @@ object ArscEditor {
                 }
             }
 
-            if (chunkSize <= 0) {
-                idx += 4
-            } else {
-                idx += chunkSize
-            }
+            if (pkgChunkSize <= 0) break
+            pkgOffset += pkgChunkSize
         }
 
         return result

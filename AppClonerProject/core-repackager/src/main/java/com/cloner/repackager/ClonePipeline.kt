@@ -107,11 +107,6 @@ class ClonePipeline(private val config: CloneConfig) {
                         (entryName.contains("ic_launcher") || entryName.contains("icon") || entryName.contains("logo") || entryName.contains("app_icon")) &&
                         entryName.endsWith(".png")
 
-                val isAdaptiveIconXml = config.modifiedIconBytes != null &&
-                        (entryName.startsWith("res/mipmap-anydpi") || entryName.startsWith("res/drawable-anydpi")) &&
-                        (entryName.contains("ic_launcher") || entryName.contains("icon")) &&
-                        entryName.endsWith(".xml")
-
                 when {
                     // Xử lý AndroidManifest.xml nhị phân
                     entryName == "AndroidManifest.xml" -> {
@@ -156,17 +151,12 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // Bỏ qua XML Adaptive Icon cũ để Launcher hiển thị trực tiếp Icon màu mới
-                    isAdaptiveIconXml -> {
-                        // Bỏ qua để hệ điều hành hiển thị trực tiếp PNG đã đổi màu
-                    }
-
                     // Bỏ qua chữ ký cũ
                     entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF") || entryName.endsWith(".DSA")) -> {
                         // Bỏ qua
                     }
 
-                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs)
+                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs, Adaptive Icon XML)
                     else -> {
                         val newEntry = ZipEntry(entryName)
                         if (entry.method == ZipEntry.STORED) {
