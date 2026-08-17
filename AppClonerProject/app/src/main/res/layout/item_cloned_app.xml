@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:padding="14dp"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp">
+
+    <!-- Phần thông tin App -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/ivClonedIcon"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:contentDescription="Cloned Icon" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="14dp">
+
+            <TextView
+                android:id="@+id/tvClonedName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TikTok (Clone 1)"
+                android:textColor="#212121"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/tvClonedPackage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="com.ss.android.ugc.trill.clone1"
+                android:textColor="#757575"
+                android:textSize="12sp"
+                android:maxLines="1" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/tvClonedSize"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="45.2 MB"
+                    android:textColor="#546E7A"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tvClonedStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=" • Chưa cài đặt"
+                    android:textColor="#E65100"
+                    android:textStyle="bold"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Đường phân cách -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#ECEFF1"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Thanh nút hành động -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end|center_vertical">
+
+        <Button
+            android:id="@+id/btnClonedDelete"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Xóa File"
+            android:textColor="#D32F2F"
+            android:background="#FFEBEE"
+            android:textSize="11sp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btnClonedShare"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Chia sẻ"
+            android:textColor="#1565C0"
+            android:background="#E3F2FD"
+            android:textSize="11sp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btnClonedAction"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="CÀI ĐẶT NGAY"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:background="#2E7D32"
+            android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>
