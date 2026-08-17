@@ -150,14 +150,43 @@
             android:orientation="vertical"
             android:padding="16dp"
             android:background="#FFFFFF"
-            android:layout_marginBottom="24dp">
+            android:layout_marginBottom="16dp">
+
+            <!-- Fake Dòng máy & Model -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <EditText
+                    android:id="@+id/etModel"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Dòng máy (vd: Samsung Galaxy S24)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnGenModel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Đổi Máy"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
 
             <!-- Android ID -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
 
                 <EditText
                     android:id="@+id/etAndroidId"
@@ -298,6 +327,61 @@
                 android:textColor="#212121"
                 android:textSize="13sp"
                 android:layout_marginTop="12dp" />
+        </LinearLayout>
+
+        <!-- Nhóm 3: Cấu hình Proxy / Địa chỉ IP Cố định cho App Clone -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="3. GÁN ĐỊA CHỈ IP / PROXY CỐ ĐỊNH"
+            android:textStyle="bold"
+            android:textColor="#1565C0"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#FFFFFF"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gán Proxy để app clone chỉ đi qua 1 địa chỉ IP vĩnh viễn:"
+                android:textSize="12sp"
+                android:textColor="#546E7A"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/etProxyHost"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="2"
+                    android:hint="Địa chỉ IP (vd: 103.145.2.8)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/etProxyPort"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Port (1080)"
+                    android:inputType="number"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Nút Bắt đầu Clone -->

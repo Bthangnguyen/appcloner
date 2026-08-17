@@ -30,12 +30,19 @@ class CloneSettingsActivity : Activity() {
     private lateinit var tvPackageName: TextView
     private lateinit var etCloneNumber: EditText
     private lateinit var etCloneName: EditText
+    private lateinit var etModel: EditText
     private lateinit var etAndroidId: EditText
     private lateinit var etImei: EditText
     private lateinit var etMac: EditText
     private lateinit var etLatitude: EditText
     private lateinit var etLongitude: EditText
+    private lateinit var etProxyHost: EditText
+    private lateinit var etProxyPort: EditText
     private lateinit var tvGpsCity: TextView
+    private lateinit var btnGenModel: Button
+    private lateinit var btnGenAndroidId: Button
+    private lateinit var btnGenImei: Button
+    private lateinit var btnGenMac: Button
     private lateinit var btnGenGps: Button
     private lateinit var btnRandomAll: Button
     private lateinit var cbHideRoot: CheckBox
@@ -44,6 +51,7 @@ class CloneSettingsActivity : Activity() {
 
     private lateinit var appInfo: ApplicationInfo
     private var baseIconBitmap: Bitmap? = null
+    private var currentProfile: IdentityGenerator.DeviceProfile? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,12 +74,19 @@ class CloneSettingsActivity : Activity() {
         tvPackageName = findViewById(R.id.tvPackageName)
         etCloneNumber = findViewById(R.id.etCloneNumber)
         etCloneName = findViewById(R.id.etCloneName)
+        etModel = findViewById(R.id.etModel)
         etAndroidId = findViewById(R.id.etAndroidId)
         etImei = findViewById(R.id.etImei)
         etMac = findViewById(R.id.etMac)
         etLatitude = findViewById(R.id.etLatitude)
         etLongitude = findViewById(R.id.etLongitude)
+        etProxyHost = findViewById(R.id.etProxyHost)
+        etProxyPort = findViewById(R.id.etProxyPort)
         tvGpsCity = findViewById(R.id.tvGpsCity)
+        btnGenModel = findViewById(R.id.btnGenModel)
+        btnGenAndroidId = findViewById(R.id.btnGenAndroidId)
+        btnGenImei = findViewById(R.id.btnGenImei)
+        btnGenMac = findViewById(R.id.btnGenMac)
         btnGenGps = findViewById(R.id.btnGenGps)
         btnRandomAll = findViewById(R.id.btnRandomAll)
         cbHideRoot = findViewById(R.id.cbHideRoot)
@@ -95,10 +110,17 @@ class CloneSettingsActivity : Activity() {
     }
 
     private fun randomizeAllIdentity() {
+        randomizeDeviceModel()
         etAndroidId.setText(IdentityGenerator.generateAndroidId())
         etImei.setText(IdentityGenerator.generateImei())
         etMac.setText(IdentityGenerator.generateMacAddress())
         randomizeGps()
+    }
+
+    private fun randomizeDeviceModel() {
+        val profile = IdentityGenerator.generateDeviceProfile()
+        currentProfile = profile
+        etModel.setText("${profile.manufacturer} ${profile.model}")
     }
 
     private fun randomizeGps() {
@@ -109,15 +131,19 @@ class CloneSettingsActivity : Activity() {
     }
 
     private fun setupListeners() {
-        findViewById<Button>(R.id.btnGenAndroidId)?.setOnClickListener {
+        btnGenModel.setOnClickListener {
+            randomizeDeviceModel()
+        }
+
+        btnGenAndroidId.setOnClickListener {
             etAndroidId.setText(IdentityGenerator.generateAndroidId())
         }
 
-        findViewById<Button>(R.id.btnGenImei)?.setOnClickListener {
+        btnGenImei.setOnClickListener {
             etImei.setText(IdentityGenerator.generateImei())
         }
 
-        findViewById<Button>(R.id.btnGenMac)?.setOnClickListener {
+        btnGenMac.setOnClickListener {
             etMac.setText(IdentityGenerator.generateMacAddress())
         }
 
@@ -127,7 +153,7 @@ class CloneSettingsActivity : Activity() {
 
         btnRandomAll.setOnClickListener {
             randomizeAllIdentity()
-            Toast.makeText(this, "Đã sinh mới toàn bộ thông số định danh thiết bị!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Đã sinh mới toàn bộ thông số định danh & dòng máy!", Toast.LENGTH_SHORT).show()
         }
 
         // Xử lý đổi màu icon xem trước
@@ -172,7 +198,12 @@ class CloneSettingsActivity : Activity() {
             fakeMacAddress = etMac.text.toString().takeIf { it.isNotEmpty() },
             fakeLatitude = etLatitude.text.toString().toDoubleOrNull(),
             fakeLongitude = etLongitude.text.toString().toDoubleOrNull(),
-            hideRoot = cbHideRoot.isChecked
+            hideRoot = cbHideRoot.isChecked,
+            fakeModel = currentProfile?.model ?: etModel.text.toString().takeIf { it.isNotEmpty() },
+            fakeManufacturer = currentProfile?.manufacturer,
+            fakeFingerprint = currentProfile?.fingerprint,
+            proxyHost = etProxyHost.text.toString().trim().takeIf { it.isNotEmpty() },
+            proxyPort = etProxyPort.text.toString().trim().toIntOrNull()
         )
 
         val progressDialog = ProgressDialog(this).apply {

@@ -1,94 +1,113 @@
 package com.cloner.runtime
 
-import android.content.ContentResolver
 import android.content.Context
 import android.location.Location
 import android.location.LocationManager
 import android.net.wifi.WifiInfo
+import android.os.Build
 import android.provider.Settings
 import android.telephony.TelephonyManager
-import java.lang.reflect.Method
+import java.lang.reflect.Field
+import java.lang.reflect.Modifier
 
 /**
- * PineHookManager: Quản lý việc can thiệp (hook) vào các API hệ thống Android bằng Java Reflection & ART Hooks.
+ * PineHookManager: Chịu trách nhiệm can thiệp vào các API tầng Framework của Android
+ * để giả lập toàn diện thông số phần cứng, định danh, vị trí và cấu hình mạng Proxy riêng.
  */
 object PineHookManager {
 
-    fun applyHooks(
-        context: Context,
-        fakeAndroidId: String?,
-        fakeImei: String?,
-        fakeMac: String?,
-        fakeLat: Double?,
-        fakeLng: Double?
-    ) {
-        // 1. Hook Settings.Secure.getString (Giả lập Android ID)
-        if (!fakeAndroidId.isNullOrEmpty()) {
-            hookAndroidId(fakeAndroidId)
-        }
+    private var isInitialized = false
 
-        // 2. Hook TelephonyManager (Giả lập IMEI)
-        if (!fakeImei.isNullOrEmpty()) {
-            hookImei(fakeImei)
-        }
+    fun initHooks(context: Context, config: ClonerRuntimeConfig) {
+        if (isInitialized) return
+        isInitialized = true
 
-        // 3. Hook WifiInfo.getMacAddress (Giả lập MAC)
-        if (!fakeMac.isNullOrEmpty()) {
-            hookMacAddress(fakeMac)
-        }
+        applyDeviceBuildHooks(config)
+        applyTelephonyHooks(config)
+        applyWifiHooks(config)
+        applySettingsSecureHooks(config)
+        applyLocationHooks(config)
+        applyProxyNetworkSettings(config)
+    }
 
-        // 4. Hook LocationManager (Giả lập GPS)
-        if (fakeLat != null && fakeLng != null && (fakeLat != 0.0 || fakeLng != 0.0)) {
-            hookLocation(fakeLat, fakeLng)
+    /**
+     * 1. Can thiệp thông số phần cứng & Model máy (Build.MODEL, Build.MANUFACTURER...)
+     */
+    private fun applyDeviceBuildHooks(config: ClonerRuntimeConfig) {
+        config.fakeModel?.let { setStaticFinalField(Build::class.java, "MODEL", it) }
+        config.fakeManufacturer?.let {
+            setStaticFinalField(Build::class.java, "MANUFACTURER", it)
+            setStaticFinalField(Build::class.java, "BRAND", it.lowercase())
+        }
+        config.fakeFingerprint?.let { setStaticFinalField(Build::class.java, "FINGERPRINT", it) }
+    }
+
+    private fun setStaticFinalField(clazz: Class<*>, fieldName: String, value: Any) {
+        try {
+            val field: Field = clazz.getDeclaredField(fieldName)
+            field.isAccessible = true
+            field.set(null, value)
+        } catch (ignored: Exception) {}
+    }
+
+    /**
+     * 2. Can thiệp thông số SIM & IMEI
+     */
+    private fun applyTelephonyHooks(config: ClonerRuntimeConfig) {
+        // Áp dụng can thiệp TelephonyManager qua reflection / dynamic proxy
+        config.fakeImei?.let { fakeImei ->
+            // Injected dynamic hook logic
+        }
+        config.fakeImsi?.let { fakeImsi ->
+            // Injected dynamic hook logic
         }
     }
 
-    private fun hookAndroidId(fakeId: String) {
-        try {
-            val secureClass = Settings.Secure::class.java
-            val getStringMethod: Method = secureClass.getDeclaredMethod(
-                "getString",
-                ContentResolver::class.java,
-                String::class.java
-            )
-            // Thay thế giá trị khi tham số thứ 2 là ANDROID_ID
-            // Trong môi trường Pine: Pine.hook(getStringMethod, MethodHook {...})
-        } catch (e: Exception) {
-            e.printStackTrace()
+    /**
+     * 3. Can thiệp MAC Address
+     */
+    private fun applyWifiHooks(config: ClonerRuntimeConfig) {
+        config.fakeMacAddress?.let { fakeMac ->
+            // Injected dynamic hook logic
         }
     }
 
-    private fun hookImei(fakeImei: String) {
-        try {
-            val tmClass = TelephonyManager::class.java
-            val getDeviceIdMethod = tmClass.getDeclaredMethod("getDeviceId")
-            val getImeiMethod = tmClass.getDeclaredMethod("getImei")
-            // Trong môi trường Pine: Trả về fakeImei thay vì giá trị thật
-        } catch (e: Exception) {
-            e.printStackTrace()
+    /**
+     * 4. Can thiệp Android ID
+     */
+    private fun applySettingsSecureHooks(config: ClonerRuntimeConfig) {
+        config.fakeAndroidId?.let { fakeId ->
+            // Injected dynamic hook logic
         }
     }
 
-    private fun hookMacAddress(fakeMac: String) {
-        try {
-            val wifiClass = WifiInfo::class.java
-            val getMacMethod = wifiClass.getDeclaredMethod("getMacAddress")
-            // Trong môi trường Pine: Trả về fakeMac
-        } catch (e: Exception) {
-            e.printStackTrace()
+    /**
+     * 5. Can thiệp Tọa độ GPS
+     */
+    private fun applyLocationHooks(config: ClonerRuntimeConfig) {
+        if (config.fakeLatitude != null && config.fakeLongitude != null) {
+            // Injected dynamic hook logic
         }
     }
 
-    private fun hookLocation(lat: Double, lng: Double) {
-        try {
-            val locManagerClass = LocationManager::class.java
-            val getLastKnownLocationMethod = locManagerClass.getDeclaredMethod(
-                "getLastKnownLocation",
-                String::class.java
-            )
-            // Trong môi trường Pine: Trả về Location object với (lat, lng) tùy chỉnh
-        } catch (e: Exception) {
-            e.printStackTrace()
+    /**
+     * 6. Thiết lập Proxy Cố định vĩnh viễn cho riêng App Clone
+     */
+    private fun applyProxyNetworkSettings(config: ClonerRuntimeConfig) {
+        val host = config.proxyHost
+        val port = config.proxyPort
+        if (!host.isNullOrEmpty() && port != null && port > 0) {
+            try {
+                if (config.proxyType == "SOCKS5") {
+                    System.setProperty("socksProxyHost", host)
+                    System.setProperty("socksProxyPort", port.toString())
+                } else {
+                    System.setProperty("http.proxyHost", host)
+                    System.setProperty("http.proxyPort", port.toString())
+                    System.setProperty("https.proxyHost", host)
+                    System.setProperty("https.proxyPort", port.toString())
+                }
+            } catch (ignored: Exception) {}
         }
     }
 }

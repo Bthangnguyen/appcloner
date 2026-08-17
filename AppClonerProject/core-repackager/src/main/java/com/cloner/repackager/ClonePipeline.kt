@@ -15,14 +15,23 @@ data class CloneConfig(
     val newPackageName: String,
     val newAppName: String,
     val cloneNumber: Int = 1,
+    // Thông số định danh cơ bản
     val fakeAndroidId: String? = null,
     val fakeImei: String? = null,
     val fakeMacAddress: String? = null,
     val fakeLatitude: Double? = null,
     val fakeLongitude: Double? = null,
     val hideRoot: Boolean = true,
-    val socksProxyHost: String? = null,
-    val socksProxyPort: Int? = null
+    // Thông số thiết bị nâng cao
+    val fakeModel: String? = null,
+    val fakeManufacturer: String? = null,
+    val fakeFingerprint: String? = null,
+    val fakeDrmId: String? = null,
+    val fakeImsi: String? = null,
+    // Proxy mạng cố định theo app
+    val proxyHost: String? = null,
+    val proxyPort: Int? = null,
+    val proxyType: String? = "HTTP"
 )
 
 /**
@@ -110,6 +119,7 @@ class ClonePipeline(private val config: CloneConfig) {
     private fun injectRuntimeConfig(zipOut: ZipOutputStream) {
         val configJson = """
             {
+                "originalPackageName": "${config.originalPackageName}",
                 "newPackageName": "${config.newPackageName}",
                 "cloneNumber": ${config.cloneNumber},
                 "fakeAndroidId": "${config.fakeAndroidId ?: ""}",
@@ -118,8 +128,14 @@ class ClonePipeline(private val config: CloneConfig) {
                 "fakeLatitude": ${config.fakeLatitude ?: 0.0},
                 "fakeLongitude": ${config.fakeLongitude ?: 0.0},
                 "hideRoot": ${config.hideRoot},
-                "socksProxyHost": "${config.socksProxyHost ?: ""}",
-                "socksProxyPort": ${config.socksProxyPort ?: 0}
+                "fakeModel": "${config.fakeModel ?: ""}",
+                "fakeManufacturer": "${config.fakeManufacturer ?: ""}",
+                "fakeFingerprint": "${config.fakeFingerprint ?: ""}",
+                "fakeDrmId": "${config.fakeDrmId ?: ""}",
+                "fakeImsi": "${config.fakeImsi ?: ""}",
+                "proxyHost": "${config.proxyHost ?: ""}",
+                "proxyPort": ${config.proxyPort ?: 0},
+                "proxyType": "${config.proxyType ?: "HTTP"}"
             }
         """.trimIndent()
 
