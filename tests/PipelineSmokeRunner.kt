@@ -4,12 +4,13 @@ import java.io.File
 
 /** End-to-end JVM smoke runner for manifest rewriting, repackaging and signing. */
 fun main(args: Array<String>) {
-    require(args.size == 2) { "Expected input.apk and output.apk" }
+    require(args.size >= 2) { "Expected one or more input APKs followed by output.apk" }
     val config = CloneConfig(
         originalPackageName = "com.cloner.app",
         newPackageName = "com.cloner.app.clone99",
         newAppName = "App Cloner Smoke",
         cloneNumber = 99
     )
-    ClonePipeline(config).execute(listOf(File(args[0])), File(args[1]))
+    val sourceApks = args.dropLast(1).map(::File)
+    ClonePipeline(config).execute(sourceApks, File(args.last()))
 }

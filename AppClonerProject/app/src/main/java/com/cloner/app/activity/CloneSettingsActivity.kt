@@ -3,19 +3,16 @@ package com.cloner.app.activity
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.ProgressDialog
-import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.provider.Settings
 import android.util.Log
 import android.widget.*
 import com.cloner.app.R
-import com.cloner.app.util.AppClonerFileProvider
 import com.cloner.app.util.IconProcessor
+import com.cloner.app.util.SplitApkInstaller
 import com.cloner.repackager.CloneConfig
 import com.cloner.repackager.ClonePipeline
 import com.cloner.runtime.IdentityGenerator
@@ -262,6 +259,9 @@ class CloneSettingsActivity : Activity() {
                         }
                     }
                 })
+                ClonePipeline.installFilesFor(outApk).forEachIndexed { index, file ->
+                    appendCloneLog(diagnosticLog, "OUTPUT[$index]=${file.absolutePath}, size=${file.length()}")
+                }
 
                 runOnUiThread {
                     progressDialog.dismiss()
@@ -311,9 +311,15 @@ class CloneSettingsActivity : Activity() {
     }
 
     private fun showCloneSuccessDialog(apkFile: File, appName: String) {
+        val splitCount = ClonePipeline.installFilesFor(apkFile).size - 1
+        val packageDescription = if (splitCount > 0) {
+            "Bộ cài gồm base APK và $splitCount split APK"
+        } else {
+            "Tệp APK đơn"
+        }
         AlertDialog.Builder(this)
             .setTitle(" Nhân bản Thành công!")
-            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\nTệp APK hoàn chỉnh (~${String.format("%.1f", apkFile.length() / (1024.0 * 1024.0))} MB) đã sẵn sàng.\n\nBạn có muốn cài đặt ngay bây giờ không?")
+            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\n$packageDescription đã sẵn sàng.\n\nBạn có muốn cài đặt ngay bây giờ không?")
             .setPositiveButton(" CÀI ĐẶT NGAY") { _, _ ->
                 installApk(apkFile)
             }
@@ -322,26 +328,10 @@ class CloneSettingsActivity : Activity() {
     }
 
     private fun installApk(file: File) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (!packageManager.canRequestPackageInstalls()) {
-                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                    Toast.makeText(this, "Vui lòng cho phép quyền 'Cài đặt ứng dụng không rõ nguồn gốc' rồi bấm cài đặt lại", Toast.LENGTH_LONG).show()
-                    return
-                }
-            }
+        SplitApkInstaller.install(this, file, configPackageName(file))
+    }
 
-            val apkUri = AppClonerFileProvider.getUriForFile(file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Lỗi khởi động cài đặt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-        }
+    private fun configPackageName(file: File): String {
+        return file.nameWithoutExtension
     }
 }

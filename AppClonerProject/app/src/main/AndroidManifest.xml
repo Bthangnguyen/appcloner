@@ -72,5 +72,9 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver
+            android:name=".util.InstallStatusReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>

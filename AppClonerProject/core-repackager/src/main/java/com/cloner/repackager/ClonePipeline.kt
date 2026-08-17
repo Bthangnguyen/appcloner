@@ -104,8 +104,6 @@ class ClonePipeline(private val config: CloneConfig) {
 
             val zipOut = ZipOutputStream(FileOutputStream(tempUnsignedApk))
             val buffer = ByteArray(8192)
-            val addedEntries = HashSet<String>()
-
             listener?.onProgress("Đang tái cấu trúc AndroidManifest, resources.arsc & Icon...", 30)
 
             // Bước 2: Tái tạo Base APK
@@ -113,7 +111,6 @@ class ClonePipeline(private val config: CloneConfig) {
             while (baseEntries.hasMoreElements()) {
                 val entry = baseEntries.nextElement()
                 val entryName = entry.name
-                addedEntries.add(entryName)
 
                 // Nếu đầu vào đã từng được clone, cấu hình mới sẽ được ghi lại ở cuối pipeline.
                 if (entryName == "assets/cloner_runtime_config.json") {
@@ -199,55 +196,34 @@ class ClonePipeline(private val config: CloneConfig) {
             }
             baseZip.close()
 
-            // Bước 3: Hợp nhất Split APKs
-            if (sourceApks.size > 1) {
-                listener?.onProgress("Đang hợp nhất thư viện native và tài nguyên splits...", 50)
-                for (i in 1 until sourceApks.size) {
-                    val splitFile = sourceApks[i]
-                    if (!splitFile.exists()) continue
-
-                    val splitZip = ZipFile(splitFile)
-                    val splitEntries = splitZip.entries()
-
-                    while (splitEntries.hasMoreElements()) {
-                        val entry = splitEntries.nextElement()
-                        val entryName = entry.name
-
-                        if (entryName == "AndroidManifest.xml" || entryName.startsWith("META-INF/") || addedEntries.contains(entryName)) {
-                            continue
-                        }
-
-                        addedEntries.add(entryName)
-                        val newEntry = ZipEntry(entryName)
-                        if (entry.method == ZipEntry.STORED) {
-                            newEntry.method = ZipEntry.STORED
-                            newEntry.size = entry.size
-                            newEntry.compressedSize = entry.size
-                            newEntry.crc = entry.crc
-                        }
-                        zipOut.putNextEntry(newEntry)
-                        val inputStream = splitZip.getInputStream(entry)
-                        var bytesRead: Int
-                        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                            zipOut.write(buffer, 0, bytesRead)
-                        }
-                        zipOut.closeEntry()
-                        inputStream.close()
-                    }
-                    splitZip.close()
-                }
-            }
-
-            // Bước 4: Nhúng cấu hình Runtime giả lập
-            listener?.onProgress("Đang nhúng cấu hình giả lập danh tính & proxy...", 70)
+            // Bước 3: Nhúng cấu hình Runtime vào base APK. Split APK phải được giữ
+            // riêng vì mỗi split có manifest/resource table và split name riêng.
+            listener?.onProgress("Đang nhúng cấu hình vào base APK...", 50)
             injectRuntimeConfig(zipOut)
 
             zipOut.close()
 
-            // Bước 5: Ký số kép v1 + v2
-            listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 85)
+            // Bước 4: Ký base APK
+            listener?.onProgress("Đang ký base APK...", 60)
             ApkSignerHelper.signApk(tempUnsignedApk, outputApk) { step, signPercentage ->
-                listener?.onProgress(step, 85 + (signPercentage * 14 / 100))
+                listener?.onProgress(step, 60 + (signPercentage * 15 / 100))
+            }
+
+            // Bước 5: Repackage và ký từng split độc lập bằng cùng certificate.
+            val splitOutputDir = splitOutputDirFor(outputApk)
+            clearSplitOutputDir(splitOutputDir)
+            if (sourceApks.size > 1) {
+                splitOutputDir.mkdirs()
+                val splitCount = sourceApks.size - 1
+                for (i in 1 until sourceApks.size) {
+                    val splitFile = sourceApks[i]
+                    if (!splitFile.exists()) continue
+                    val safeName = splitFile.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    val splitOutput = File(splitOutputDir, "${i}_$safeName")
+                    val percentage = 75 + ((i - 1) * 24 / splitCount)
+                    listener?.onProgress("Đang xử lý split $i/$splitCount: ${splitFile.name}", percentage)
+                    cloneSplitApk(splitFile, splitOutput, dexClasses)
+                }
             }
 
             listener?.onProgress("Hoàn thành quá trình Clone APK!", 100)
@@ -256,6 +232,103 @@ class ClonePipeline(private val config: CloneConfig) {
             if (tempUnsignedApk.exists()) {
                 tempUnsignedApk.delete()
             }
+        }
+    }
+
+    private fun cloneSplitApk(sourceApk: File, outputApk: File, dexClasses: Set<String>) {
+        val tempUnsigned = File(outputApk.parentFile, "temp_${outputApk.name}")
+        try {
+            ZipFile(sourceApk).use { zipIn ->
+                ZipOutputStream(BufferedOutputStream(FileOutputStream(tempUnsigned))).use { zipOut ->
+                    val entries = zipIn.entries()
+                    val buffer = ByteArray(8192)
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        val entryName = entry.name
+                        if (entryName == "assets/cloner_runtime_config.json" || isOldSignature(entryName)) {
+                            continue
+                        }
+
+                        val isIconImage = config.modifiedIconBytes != null &&
+                                (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
+                                (entryName.contains("ic_launcher") || entryName.contains("icon") ||
+                                        entryName.contains("logo") || entryName.contains("app_icon")) &&
+                                entryName.endsWith(".png")
+
+                        when {
+                            entryName == "AndroidManifest.xml" -> {
+                                val manifest = zipIn.getInputStream(entry).use { it.readBytes() }
+                                val modified = AxmlEditor(manifest).modifyManifest(
+                                    originalPackage = config.originalPackageName,
+                                    newPackage = config.newPackageName,
+                                    dexClasses = dexClasses,
+                                    newApplicationClass = null
+                                )
+                                zipOut.putNextEntry(ZipEntry(entryName))
+                                zipOut.write(modified)
+                                zipOut.closeEntry()
+                            }
+
+                            isIconImage -> {
+                                zipOut.putNextEntry(ZipEntry(entryName))
+                                zipOut.write(config.modifiedIconBytes)
+                                zipOut.closeEntry()
+                            }
+
+                            else -> copyZipEntry(zipIn, zipOut, entry, buffer)
+                        }
+                    }
+                }
+            }
+            ApkSignerHelper.signApk(tempUnsigned, outputApk)
+        } finally {
+            if (tempUnsigned.exists()) tempUnsigned.delete()
+        }
+    }
+
+    private fun copyZipEntry(zipIn: ZipFile, zipOut: ZipOutputStream, entry: ZipEntry, buffer: ByteArray) {
+        val newEntry = ZipEntry(entry.name)
+        if (entry.method == ZipEntry.STORED) {
+            newEntry.method = ZipEntry.STORED
+            newEntry.size = entry.size
+            newEntry.compressedSize = entry.size
+            newEntry.crc = entry.crc
+        }
+        zipOut.putNextEntry(newEntry)
+        zipIn.getInputStream(entry).use { input ->
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                zipOut.write(buffer, 0, bytesRead)
+            }
+        }
+        zipOut.closeEntry()
+    }
+
+    private fun isOldSignature(entryName: String): Boolean {
+        if (!entryName.startsWith("META-INF/")) return false
+        val upper = entryName.uppercase()
+        return upper.endsWith(".SF") || upper.endsWith(".RSA") ||
+                upper.endsWith(".DSA") || upper.endsWith(".MF")
+    }
+
+    private fun clearSplitOutputDir(directory: File) {
+        if (!directory.exists()) return
+        directory.listFiles()?.forEach { child ->
+            if (child.isFile) child.delete()
+        }
+        directory.delete()
+    }
+
+    companion object {
+        fun splitOutputDirFor(baseApk: File): File =
+            File(baseApk.parentFile, "${baseApk.nameWithoutExtension}_splits")
+
+        fun installFilesFor(baseApk: File): List<File> {
+            val splits = splitOutputDirFor(baseApk).listFiles()
+                ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
+                ?.sortedBy { it.name }
+                ?: emptyList()
+            return listOf(baseApk) + splits
         }
     }
 

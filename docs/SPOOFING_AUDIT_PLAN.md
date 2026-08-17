@@ -91,6 +91,28 @@ Tài liệu này ghi nhận kế hoạch phát triển, đối chiếu chi tiế
 - Chuyển các script `test_*.py` hiện tại thành test có assertion, fixture rõ ràng và exit code phù hợp để chạy tự động.
 - Tách rõ lỗi “repackage không hợp lệ” với trường hợp ứng dụng dùng signature check, Play Integrity hoặc cơ chế bảo vệ không hỗ trợ việc đóng gói lại.
 
+### P0.4 — Bảo toàn và cài đặt App Bundle/Split APK
+
+**Nguyên nhân chung của TikTok “không tương thích” và khả năng cao của Device Info HW tự tắt:** pipeline cũ bỏ manifest/resource table của split rồi sao chép ZIP entry vào base APK. Cách này làm mất split name, resource configuration và quan hệ base/split mà Android Package Manager yêu cầu.
+
+**Đã triển khai trong bản làm việc sau commit `ee737da`:**
+
+- Không hợp nhất thô split APK vào base nữa.
+- Sửa package trong Binary Manifest của base và từng split riêng biệt.
+- Giữ nguyên `resources.arsc`, DEX và native library của từng split.
+- Ký base và tất cả split bằng cùng certificate.
+- Lưu các split cạnh base trong thư mục `<package>_splits`.
+- Cài base cùng toàn bộ split trong một `PackageInstaller.Session` full-install.
+- Nút chia sẻ gửi cả bộ APK; xóa clone cũng xóa thư mục split tương ứng.
+- Fixture base + density split đã xác nhận: cùng package clone, giữ đúng split name, cùng SHA-256 certificate, chữ ký v1/v2 hợp lệ và zipalign hợp lệ.
+
+**Còn phải xác nhận trên Galaxy S20:**
+
+- Gỡ clone cũ, clone lại TikTok và Device Info HW bằng bản Studio mới rồi cài từ nút trong Studio.
+- Không mở riêng base APK từ trình quản lý file vì base không còn chứa dữ liệu của các split.
+- Nếu PackageInstaller thất bại, ghi lại thông báo chi tiết từ `EXTRA_STATUS_MESSAGE`.
+- Nếu Device Info HW vẫn tự tắt sau khi cài đủ split, lấy logcat để phân biệt self-check chữ ký với Java/native crash.
+
 ### P1.1 — Hoàn thiện kiến trúc runtime
 
 1. Ghép DEX của `clone-runtime` vào APK clone và xử lý multidex an toàn; hiện pipeline mới chỉ nhúng `assets/cloner_runtime_config.json`.

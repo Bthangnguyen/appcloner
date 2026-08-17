@@ -19,6 +19,8 @@ import android.view.ViewGroup
 import android.widget.*
 import com.cloner.app.R
 import com.cloner.app.util.AppClonerFileProvider
+import com.cloner.app.util.SplitApkInstaller
+import com.cloner.repackager.ClonePipeline
 import java.io.File
 
 /**
@@ -193,11 +195,11 @@ class MainActivity : Activity() {
                     if (launchIntent != null) {
                         startActivity(launchIntent)
                     } else {
-                        installApk(item.file)
+                        installApk(item.file, item.packageName)
                     }
                 } else {
                     // Cài đặt APK
-                    installApk(item.file)
+                    installApk(item.file, item.packageName)
                 }
             },
             onDelete = { item ->
@@ -206,6 +208,10 @@ class MainActivity : Activity() {
                     .setMessage("Bạn có chắc chắn muốn xóa file APK clone \"${item.appName}\"?")
                     .setPositiveButton("Xóa") { _, _ ->
                         item.file.delete()
+                        ClonePipeline.splitOutputDirFor(item.file).let { splitDir ->
+                            splitDir.listFiles()?.forEach { it.delete() }
+                            splitDir.delete()
+                        }
                         loadClonedApps()
                         Toast.makeText(this, "Đã xóa file APK", Toast.LENGTH_SHORT).show()
                     }
@@ -252,7 +258,7 @@ class MainActivity : Activity() {
                                 appIcon = pkgInfo.applicationInfo?.loadIcon(packageManager)
                             }
 
-                            val sizeMb = apkFile.length() / (1024.0 * 1024.0)
+                            val sizeMb = ClonePipeline.installFilesFor(apkFile).sumOf { it.length() } / (1024.0 * 1024.0)
                             val sizeStr = String.format("%.1f MB", sizeMb)
 
                             clonedList.add(ClonedItem(apkFile, appName, pkgName, sizeStr, appIcon, isInstalled))
@@ -279,39 +285,26 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun installApk(file: File) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (!packageManager.canRequestPackageInstalls()) {
-                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                    Toast.makeText(this, "Vui lòng cấp quyền 'Cài đặt ứng dụng không rõ nguồn gốc' rồi bấm cài đặt lại", Toast.LENGTH_LONG).show()
-                    return
-                }
-            }
-
-            val apkUri = AppClonerFileProvider.getUriForFile(file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Lỗi cài đặt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-        }
+    private fun installApk(file: File, packageName: String) {
+        SplitApkInstaller.install(this, file, packageName)
     }
 
     private fun shareApk(file: File) {
         try {
-            val apkUri = AppClonerFileProvider.getUriForFile(file)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            val files = ClonePipeline.installFilesFor(file)
+            val uris = ArrayList(files.map { AppClonerFileProvider.getUriForFile(it) })
+            val shareIntent = Intent(
+                if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND
+            ).apply {
                 type = "application/vnd.android.package-archive"
-                putExtra(Intent.EXTRA_STREAM, apkUri)
-                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                if (uris.size > 1) {
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                } else {
+                    putExtra(Intent.EXTRA_STREAM, uris.first())
+                }
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(shareIntent, "Chia sẻ File APK Clone"))
+            startActivity(Intent.createChooser(shareIntent, "Chia sẻ bộ APK Clone"))
         } catch (e: Exception) {
             Toast.makeText(this, "Lỗi chia sẻ: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
