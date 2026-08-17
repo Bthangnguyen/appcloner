@@ -158,7 +158,7 @@ class ClonePipeline(private val config: CloneConfig) {
                             originalPackage = config.originalPackageName,
                             newPackage = config.newPackageName,
                             dexClasses = dexClasses,
-                            newApplicationClass = if (config.runtimeDexBytes != null) "com.cloner.runtime.AppClonerApplication" else null
+                            newApplicationClass = null
                         )
                         originalAppClass = editor.originalApplicationClass
 
