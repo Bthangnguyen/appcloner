@@ -44,9 +44,9 @@ os.makedirs(gen_dir, exist_ok=True)
 
 run(f'"{AAPT2}" compile --dir "{res_dir}" -o "{res_zip}"', "Compile Resources (AAPT2)")
 
-# 2. Link Resources va sinh R.java
+# 2. Link Resources va sinh R.java voi Target SDK 34 de Full Screen 100%
 res_apk = os.path.join(BUILD_DIR, "resources.apk")
-run(f'"{AAPT2}" link -I "{ANDROID_JAR}" --manifest "{manifest_xml}" --java "{gen_dir}" -o "{res_apk}" "{res_zip}" --auto-add-overlay', "Link Resources (AAPT2 link)")
+run(f'"{AAPT2}" link -I "{ANDROID_JAR}" --min-sdk-version 21 --target-sdk-version 34 --manifest "{manifest_xml}" --java "{gen_dir}" -o "{res_apk}" "{res_zip}" --auto-add-overlay', "Link Resources (AAPT2 link)")
 
 # 3. Thu thap tat ca cac file source Kotlin & Java
 source_files = []

@@ -2,10 +2,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.cloner.app">
 
+    <!-- Cấu hình SDK chuẩn để Android hiển thị full màn hình 100% (chống lỗi màn hình thu nhỏ) -->
+    <uses-sdk
+        android:minSdkVersion="21"
+        android:targetSdkVersion="34" />
+
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true"
+        android:resizeable="true" />
+
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -17,12 +29,14 @@
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="App Cloner Studio"
         android:supportsRtl="true"
+        android:resizeableActivity="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- Launcher Activity: Mở thẳng giao diện chính App Cloner Studio -->
+        <!-- Launcher Activity: Mở thẳng giao diện chính App Cloner Studio Full Screen -->
         <activity
             android:name=".activity.MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:label="App Cloner Studio">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -34,12 +48,15 @@
         <activity
             android:name=".activity.CloneSettingsActivity"
             android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustPan"
             android:label="Cấu hình Nhân bản" />
 
         <!-- Màn hình Máy tính ngụy trang -->
         <activity
             android:name=".activity.CalculatorActivity"
             android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:label="Calculator" />
 
     </application>
