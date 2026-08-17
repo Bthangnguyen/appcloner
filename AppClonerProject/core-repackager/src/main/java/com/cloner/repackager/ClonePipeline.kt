@@ -40,7 +40,6 @@ data class CloneConfig(
 
 /**
  * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK.
- * Đồng bộ hóa toàn diện: AndroidManifest nhị phân + resources.arsc + Split APKs + Chữ ký kép v1/v2.
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -103,6 +102,16 @@ class ClonePipeline(private val config: CloneConfig) {
                 val entryName = entry.name
                 addedEntries.add(entryName)
 
+                val isIconImage = config.modifiedIconBytes != null &&
+                        (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
+                        (entryName.contains("ic_launcher") || entryName.contains("icon") || entryName.contains("logo") || entryName.contains("app_icon")) &&
+                        entryName.endsWith(".png")
+
+                val isAdaptiveIconXml = config.modifiedIconBytes != null &&
+                        (entryName.startsWith("res/mipmap-anydpi") || entryName.startsWith("res/drawable-anydpi")) &&
+                        (entryName.contains("ic_launcher") || entryName.contains("icon")) &&
+                        entryName.endsWith(".xml")
+
                 when {
                     // Xử lý AndroidManifest.xml nhị phân
                     entryName == "AndroidManifest.xml" -> {
@@ -139,12 +148,17 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // Thay thế biểu tượng Icon khi có yêu cầu đổi màu
-                    config.modifiedIconBytes != null && (entryName.contains("ic_launcher") || entryName.contains("icon")) && entryName.endsWith(".png") -> {
+                    // Thay thế toàn bộ hình ảnh biểu tượng Icon bằng màu mới
+                    isIconImage -> {
                         val newEntry = ZipEntry(entryName)
                         zipOut.putNextEntry(newEntry)
                         zipOut.write(config.modifiedIconBytes)
                         zipOut.closeEntry()
+                    }
+
+                    // Bỏ qua XML Adaptive Icon cũ để Launcher hiển thị trực tiếp Icon màu mới
+                    isAdaptiveIconXml -> {
+                        // Bỏ qua để hệ điều hành hiển thị trực tiếp PNG đã đổi màu
                     }
 
                     // Bỏ qua chữ ký cũ
