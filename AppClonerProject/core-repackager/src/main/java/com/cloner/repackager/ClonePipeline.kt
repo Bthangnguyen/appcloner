@@ -241,9 +241,10 @@ class ClonePipeline(private val config: CloneConfig) {
                 }
             }
 
-            // Bước 4: Nhúng cấu hình Runtime giả lập
+            // Bước 4: Nhúng cấu hình Runtime giả lập (kèm chữ ký số gốc tự động trích xuất)
             listener?.onProgress("Đang nhúng cấu hình Signature Spoofing & Device Identity...", 55)
-            injectRuntimeConfig(zipOut, originalAppClass)
+            val autoSignature = extractOriginalSignatureFromFile(baseApk)
+            injectRuntimeConfig(zipOut, originalAppClass, autoSignature)
 
             zipOut.close()
 
@@ -364,14 +365,19 @@ class ClonePipeline(private val config: CloneConfig) {
         } catch (ignored: Exception) {}
     }
 
-    private fun injectRuntimeConfig(zipOut: ZipOutputStream, originalAppClass: String?) {
+    private fun injectRuntimeConfig(zipOut: ZipOutputStream, originalAppClass: String?, autoExtractedSignature: String? = null) {
+        val finalSig = if (!config.originalSignatureBase64.isNullOrEmpty()) {
+            config.originalSignatureBase64
+        } else {
+            autoExtractedSignature ?: ""
+        }
         val configJson = """
             {
                 "originalPackageName": "${config.originalPackageName}",
                 "newPackageName": "${config.newPackageName}",
                 "cloneNumber": ${config.cloneNumber},
                 "originalApplicationClass": "${originalAppClass ?: ""}",
-                "originalSignatureBase64": "${config.originalSignatureBase64 ?: ""}",
+                "originalSignatureBase64": "$finalSig",
                 "fakeAndroidId": "${config.fakeAndroidId ?: ""}",
                 "fakeImei": "${config.fakeImei ?: ""}",
                 "fakeMacAddress": "${config.fakeMacAddress ?: ""}",
@@ -394,5 +400,34 @@ class ClonePipeline(private val config: CloneConfig) {
         zipOut.putNextEntry(configEntry)
         zipOut.write(configJson.toByteArray(Charsets.UTF_8))
         zipOut.closeEntry()
+    }
+
+    private fun extractOriginalSignatureFromFile(apkFile: File): String? {
+        try {
+            ZipFile(apkFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val name = entry.name
+                    if (name.startsWith("META-INF/") && (name.endsWith(".RSA") || name.endsWith(".DSA") || name.endsWith(".EC"))) {
+                        val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                        val cf = java.security.cert.CertificateFactory.getInstance("X.509")
+                        val certs = cf.generateCertificates(java.io.ByteArrayInputStream(bytes))
+                        val first = certs.firstOrNull() as? java.security.cert.X509Certificate
+                        if (first != null) {
+                            val derBytes = first.encoded
+                            return try {
+                                android.util.Base64.encodeToString(derBytes, android.util.Base64.NO_WRAP)
+                            } catch (e: Throwable) {
+                                java.util.Base64.getEncoder().encodeToString(derBytes)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            t.printStackTrace()
+        }
+        return null
     }
 }

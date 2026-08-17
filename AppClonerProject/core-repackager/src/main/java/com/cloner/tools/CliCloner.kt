@@ -20,7 +20,13 @@ object CliCloner {
                 newPackageName = "ru.andr7e.deviceinfohw.clone1",
                 newAppName = "Device Info HW",
                 cloneNumber = 1,
-                runtimeDexBytes = runtimeDex
+                runtimeDexBytes = runtimeDex,
+                fakeModel = "Galaxy S24 Ultra",
+                fakeManufacturer = "Samsung",
+                fakeAndroidId = "8a3b5c7d9e1f2a3b",
+                fakeImei = "869402058392019",
+                fakeMacAddress = "02:00:00:1A:2B:3C",
+                fakeFingerprint = "samsung/e3qxxx/e3q:14/UP1A.231005.007/S928BXXU1AXB5:user/release-keys"
             )
             val pipeline = ClonePipeline(config)
             pipeline.execute(listOf(src), out, object : ClonePipeline.ProgressListener {

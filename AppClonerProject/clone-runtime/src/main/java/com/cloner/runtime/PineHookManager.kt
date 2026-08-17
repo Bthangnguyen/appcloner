@@ -105,49 +105,47 @@ object PineHookManager {
     private fun applySignatureVerificationBypass(context: Context, config: ClonerRuntimeConfig) {
         val origSigBase64 = config.originalSignatureBase64
         val origPkg = config.originalPackageName
+        if (origSigBase64.isNullOrEmpty()) return
+
         try {
-            val fakeSignature = if (!origSigBase64.isNullOrEmpty()) {
-                val rawSigBytes = Base64.decode(origSigBase64, Base64.DEFAULT)
-                Signature(rawSigBytes)
-            } else null
+            val rawSigBytes = Base64.decode(origSigBase64, Base64.DEFAULT)
+            val fakeSignature = Signature(rawSigBytes)
 
             val pm = context.packageManager
             val pmClass = pm.javaClass
 
-            // Hook mPM binder trong ApplicationPackageManager nếu có
             val mPMField = try { pmClass.getDeclaredField("mPM") } catch (e: Exception) { null }
-            if (mPMField != null) {
-                mPMField.isAccessible = true
-                val originalIPM = mPMField.get(pm)
-                val ipmInterface = Class.forName("android.content.pm.IPackageManager")
+            mPMField?.isAccessible = true
+            val originalIPM = mPMField?.get(pm)
 
-                val proxyIPM = Proxy.newProxyInstance(
-                    context.classLoader,
-                    arrayOf(ipmInterface)
-                ) { _, method, args ->
-                    val result = method.invoke(originalIPM, *(args ?: emptyArray()))
-                    if (method.name.startsWith("getPackageInfo") && result is PackageInfo) {
-                        val requestedPkg = args?.getOrNull(0) as? String
-                        if (requestedPkg == config.newPackageName || requestedPkg == config.originalPackageName) {
-                            if (fakeSignature != null) {
-                                result.signatures = arrayOf(fakeSignature)
-                            }
-                            if (origPkg.isNotEmpty()) {
-                                result.packageName = origPkg
-                            }
-                        }
-                    } else if (method.name.startsWith("getApplicationInfo") && result is android.content.pm.ApplicationInfo) {
-                        val requestedPkg = args?.getOrNull(0) as? String
-                        if (requestedPkg == config.newPackageName || requestedPkg == config.originalPackageName) {
-                            if (origPkg.isNotEmpty()) {
-                                result.packageName = origPkg
-                            }
-                        }
-                    }
-                    result
+            val ipmInterface = Class.forName("android.content.pm.IPackageManager")
+
+            val proxyIPM = Proxy.newProxyInstance(
+                context.classLoader,
+                arrayOf(ipmInterface)
+            ) { _, method, args ->
+                val result = if (originalIPM != null) {
+                    method.invoke(originalIPM, *(args ?: emptyArray()))
+                } else null
+
+                if (method.name.startsWith("getPackageInfo") && result is PackageInfo) {
+                    result.signatures = arrayOf(fakeSignature)
                 }
+                result
+            }
+
+            if (mPMField != null) {
                 mPMField.set(pm, proxyIPM)
             }
+
+            // Hook ActivityThread.sPackageManager static field
+            try {
+                val atClass = Class.forName("android.app.ActivityThread")
+                val sPMField = atClass.getDeclaredField("sPackageManager")
+                sPMField.isAccessible = true
+                sPMField.set(null, proxyIPM)
+            } catch (ignored: Throwable) {}
+
         } catch (e: Exception) {
             e.printStackTrace()
         }
