@@ -146,16 +146,15 @@ class ClonePipeline(private val config: CloneConfig) {
                         entryName.endsWith(".png")
 
                 when {
-                    // Xử lý AndroidManifest.xml nhị phân
+                    // Xử lý AndroidManifest.xml nhị phân: Giữ nguyên lớp Application gốc để không bị ClassCastException
                     entryName == "AndroidManifest.xml" -> {
                         val manifestBytes = baseZip.getInputStream(entry).use { it.readBytes() }
                         val editor = AxmlEditor(manifestBytes)
-                        val targetAppWrapper = if (config.runtimeDexBytes != null) "com.cloner.runtime.AppClonerApplication" else null
                         val modifiedManifest = editor.modifyManifest(
                             originalPackage = config.originalPackageName,
                             newPackage = config.newPackageName,
                             dexClasses = dexClasses,
-                            newApplicationClass = targetAppWrapper
+                            newApplicationClass = null
                         )
                         originalAppClass = editor.originalApplicationClass
 

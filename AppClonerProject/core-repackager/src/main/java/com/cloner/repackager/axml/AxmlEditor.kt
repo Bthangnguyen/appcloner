@@ -220,10 +220,18 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             }
         }
 
-        // 2f. Đặt Application class wrapper nếu có
-        if (newApplicationClass != null) {
-            for (appIdx in applicationIndices) {
+        // 2f. Đặt Application class wrapper nếu có, hoặc chuẩn hóa tên lớp Application gốc
+        for (appIdx in applicationIndices) {
+            if (newApplicationClass != null) {
                 modifiedStrings[appIdx] = newApplicationClass
+            } else {
+                val oldClass = stringsList[appIdx]
+                when {
+                    dexClasses.contains(oldClass) -> modifiedStrings[appIdx] = oldClass
+                    dexClasses.contains("$originalPackage.$oldClass") -> modifiedStrings[appIdx] = "$originalPackage.$oldClass"
+                    oldClass.startsWith(".") -> modifiedStrings[appIdx] = "$originalPackage$oldClass"
+                    !oldClass.contains(".") -> modifiedStrings[appIdx] = "$originalPackage.$oldClass"
+                }
             }
         }
 
