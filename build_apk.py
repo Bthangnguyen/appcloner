@@ -35,7 +35,41 @@ def run(cmd, desc):
     else:
         print(f"    [OK] {desc} SUCCESS!")
 
-# 1. Compile Resources bang AAPT2
+# 1. Compile Runtime Module sang runtime_classes.dex
+runtime_src_dir = os.path.join(PROJECT_DIR, "clone-runtime", "src", "main", "java")
+runtime_sources = []
+for root, dirs, files in os.walk(runtime_src_dir):
+    for f in files:
+        if f.endswith(".kt") or f.endswith(".java"):
+            runtime_sources.append(os.path.join(root, f))
+
+runtime_classes_dir = os.path.join(BUILD_DIR, "runtime_classes")
+os.makedirs(runtime_classes_dir, exist_ok=True)
+runtime_sources_arg = " ".join([f'"{sf}"' for sf in runtime_sources])
+run(f'"{JAVA}" -jar "{KOTLIN_COMPILER_JAR}" -cp "{ANDROID_JAR};{KOTLIN_STDLIB_JAR}" -d "{runtime_classes_dir}" -jvm-target 1.8 {runtime_sources_arg}', "Compile Clone Runtime Classes")
+
+runtime_jar = os.path.join(BUILD_DIR, "runtime_classes.jar")
+with zipfile.ZipFile(runtime_jar, 'w', zipfile.ZIP_DEFLATED) as jout:
+    for root, dirs, files in os.walk(runtime_classes_dir):
+        for f in files:
+            fp = os.path.join(root, f)
+            rel = os.path.relpath(fp, runtime_classes_dir)
+            jout.write(fp, rel)
+
+runtime_dex_dir = os.path.join(BUILD_DIR, "runtime_dex")
+os.makedirs(runtime_dex_dir, exist_ok=True)
+run(f'"{D8}" --lib "{ANDROID_JAR}" --min-api 21 --output "{runtime_dex_dir}" "{runtime_jar}" "{KOTLIN_STDLIB_JAR}"', "Convert Runtime to runtime_classes.dex")
+
+runtime_dex_file = os.path.join(runtime_dex_dir, "classes.dex")
+assets_dir = os.path.join(PROJECT_DIR, "app", "src", "main", "assets")
+os.makedirs(assets_dir, exist_ok=True)
+assets_runtime_dex = os.path.join(assets_dir, "runtime_classes.dex")
+with open(runtime_dex_file, "rb") as fin, open(assets_runtime_dex, "wb") as fout:
+    fout.write(fin.read())
+
+print("    [OK] Generated assets/runtime_classes.dex!")
+
+# 2. Compile Resources bang AAPT2
 res_zip = os.path.join(BUILD_DIR, "compiled_res.zip")
 res_dir = os.path.join(PROJECT_DIR, "app", "src", "main", "res")
 manifest_xml = os.path.join(PROJECT_DIR, "app", "src", "main", "AndroidManifest.xml")
@@ -44,11 +78,11 @@ os.makedirs(gen_dir, exist_ok=True)
 
 run(f'"{AAPT2}" compile --dir "{res_dir}" -o "{res_zip}"', "Compile Resources (AAPT2)")
 
-# 2. Link Resources va sinh R.java voi Target SDK 34 de Full Screen 100%
+# 3. Link Resources va sinh R.java voi Target SDK 34
 res_apk = os.path.join(BUILD_DIR, "resources.apk")
 run(f'"{AAPT2}" link -I "{ANDROID_JAR}" --min-sdk-version 21 --target-sdk-version 34 --manifest "{manifest_xml}" --java "{gen_dir}" -o "{res_apk}" "{res_zip}" --auto-add-overlay', "Link Resources (AAPT2 link)")
 
-# 3. Thu thap tat ca cac file source Kotlin & Java
+# 4. Thu thap tat ca cac file source Kotlin & Java
 source_files = []
 for root, dirs, files in os.walk(PROJECT_DIR):
     if "build_out" in root: continue
@@ -64,13 +98,13 @@ for root, dirs, files in os.walk(gen_dir):
 
 print(f"Total source files to compile: {len(source_files)}")
 
-# 4. Bien dich Kotlin / Java sang .class
+# 5. Bien dich Kotlin / Java sang .class
 classes_dir = os.path.join(BUILD_DIR, "classes")
 os.makedirs(classes_dir, exist_ok=True)
 sources_arg = " ".join([f'"{sf}"' for sf in source_files])
 run(f'"{JAVA}" -jar "{KOTLIN_COMPILER_JAR}" -cp "{ANDROID_JAR};{gen_dir};{KOTLIN_STDLIB_JAR}" -d "{classes_dir}" -jvm-target 1.8 {sources_arg}', "Compile Kotlin/Java to Class Bytecode")
 
-# 5. Dong goi classes_dir thanh classes.jar cho D8
+# 6. Dong goi classes_dir thanh classes.jar cho D8
 classes_jar = os.path.join(BUILD_DIR, "app_classes.jar")
 with zipfile.ZipFile(classes_jar, 'w', zipfile.ZIP_DEFLATED) as jout:
     for root, dirs, files in os.walk(classes_dir):
@@ -81,12 +115,12 @@ with zipfile.ZipFile(classes_jar, 'w', zipfile.ZIP_DEFLATED) as jout:
 
 print("    [OK] Packaged classes into app_classes.jar!")
 
-# 6. D8: Chuyen doi classes.jar + kotlin-stdlib.jar sang classes.dex
+# 7. D8: Chuyen doi classes.jar + kotlin-stdlib.jar sang classes.dex
 dex_dir = os.path.join(BUILD_DIR, "dex")
 os.makedirs(dex_dir, exist_ok=True)
 run(f'"{D8}" --lib "{ANDROID_JAR}" --min-api 21 --output "{dex_dir}" "{classes_jar}" "{KOTLIN_STDLIB_JAR}"', "Convert Class to DEX (D8)")
 
-# 7. Gop classes.dex vao resources.apk
+# 8. Gop classes.dex va assets vao resources.apk
 dex_file = os.path.join(dex_dir, "classes.dex")
 unaligned_apk = os.path.join(BUILD_DIR, "unaligned.apk")
 
@@ -94,14 +128,15 @@ with zipfile.ZipFile(res_apk, 'r') as zin, zipfile.ZipFile(unaligned_apk, 'w') a
     for item in zin.infolist():
         zout.writestr(item, zin.read(item.filename))
     zout.write(dex_file, "classes.dex")
+    zout.write(assets_runtime_dex, "assets/runtime_classes.dex")
 
-print("    [OK] Added classes.dex into APK package!")
+print("    [OK] Added classes.dex and assets/runtime_classes.dex into APK package!")
 
-# 8. Zipalign can chinh 4-byte
+# 9. Zipalign can chinh 4-byte
 aligned_apk = os.path.join(BUILD_DIR, "aligned.apk")
 run(f'"{ZIPALIGN}" -f 4 "{unaligned_apk}" "{aligned_apk}"', "Memory alignment (Zipalign)")
 
-# 9. Ky so APK bang Debug Keystore
+# 10. Ky so APK bang Debug Keystore
 keystore_path = os.path.join(BUILD_DIR, "debug.keystore")
 if not os.path.exists(keystore_path):
     run(f'"{KEYTOOL}" -genkeypair -v -keystore "{keystore_path}" -alias androiddebugkey -keypass android -storepass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"', "Generate Debug Keystore")

@@ -197,12 +197,32 @@ class CloneSettingsActivity : Activity() {
             iconBytes = bos.toByteArray()
         }
 
+        // Nạp runtime_classes.dex để tiêm ma trận Hook Ultra Edition vào app clone
+        val runtimeDexBytes = try {
+            assets.open("runtime_classes.dex").use { it.readBytes() }
+        } catch (e: Exception) {
+            null
+        }
+
+        // Trích xuất chữ ký gốc của app nguồn để phục vụ Signature Spoofing (Bypass kiểm tra chữ ký)
+        val originalSigBase64 = try {
+            val pkgInfo = packageManager.getPackageInfo(appInfo.packageName, android.content.pm.PackageManager.GET_SIGNATURES)
+            val sig = pkgInfo.signatures?.getOrNull(0)
+            if (sig != null) {
+                android.util.Base64.encodeToString(sig.toByteArray(), android.util.Base64.NO_WRAP)
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+
         val config = CloneConfig(
             originalPackageName = appInfo.packageName,
             newPackageName = newPkgName,
             newAppName = newName,
             cloneNumber = cloneNumber,
             modifiedIconBytes = iconBytes,
+            runtimeDexBytes = runtimeDexBytes,
+            originalSignatureBase64 = originalSigBase64,
             fakeAndroidId = etAndroidId.text.toString().takeIf { it.isNotEmpty() },
             fakeImei = etImei.text.toString().takeIf { it.isNotEmpty() },
             fakeMacAddress = etMac.text.toString().takeIf { it.isNotEmpty() },

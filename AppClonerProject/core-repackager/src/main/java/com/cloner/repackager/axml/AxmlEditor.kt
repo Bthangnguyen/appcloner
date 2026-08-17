@@ -12,6 +12,7 @@ import java.nio.ByteOrder
  * - Định vị chính xác attribute `name` của tất cả thẻ `<permission>` và `<uses-permission>`
  * - Mở rộng toàn bộ class name relative/unqualified sang tên lớp đầy đủ trong DEX
  * - Ép bật extractNativeLibs="true" để load native library .so không bị lỗi page-alignment dlopen
+ * - Hỗ trợ thiết lập Application Wrapper (`AppClonerApplication`) để kích hoạt ma trận Hook
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
@@ -19,6 +20,9 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         private const val CHUNK_AXML_FILE = 0x00080003
         private const val CHUNK_STRING_POOL = 0x001C0001
     }
+
+    var originalApplicationClass: String? = null
+        private set
 
     fun modifyManifest(
         originalPackage: String,
@@ -85,6 +89,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         val permissionIndices = HashSet<Int>()
         val usesPermissionIndices = HashSet<Int>()
         val componentIndices = HashSet<Int>()
+        val applicationIndices = HashSet<Int>()
 
         var idx = 8 + stringPoolSize
         while (idx < workingBytes.size - 8) {
@@ -120,7 +125,6 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
 
                         // Ép bật extractNativeLibs="true" nếu thuộc tính này có trong <application>
                         if (tagName == "application" && attrName == "extractNativeLibs" && tvType == 18) {
-                            // Set boolean data = 0xFFFFFFFF (true)
                             workingBytes[aOff + 16] = 0xFF.toByte()
                             workingBytes[aOff + 17] = 0xFF.toByte()
                             workingBytes[aOff + 18] = 0xFF.toByte()
@@ -133,7 +137,12 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
                                 tagName == "provider" && attrName == "authorities" -> authorityIndices.add(valIdx)
                                 tagName == "permission" && attrName == "name" -> permissionIndices.add(valIdx)
                                 tagName == "uses-permission" && attrName == "name" -> usesPermissionIndices.add(valIdx)
-                                (tagName == "activity" || tagName == "service" || tagName == "receiver" || tagName == "provider" || tagName == "application") && attrName == "name" -> componentIndices.add(valIdx)
+                                tagName == "application" && attrName == "name" -> {
+                                    applicationIndices.add(valIdx)
+                                    val origApp = stringsList[valIdx]
+                                    originalApplicationClass = if (origApp.startsWith(".")) "$originalPackage$origApp" else origApp
+                                }
+                                (tagName == "activity" || tagName == "service" || tagName == "receiver" || tagName == "provider") && attrName == "name" -> componentIndices.add(valIdx)
                             }
                         }
                     }
@@ -197,7 +206,6 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             val oldClass = stringsList[cIdx]
             when {
                 dexClasses.contains(oldClass) -> {
-                    // Tên lớp bytecode đầy đủ đã có trong DEX -> GIỮ NGUYÊN 100%
                     modifiedStrings[cIdx] = oldClass
                 }
                 dexClasses.contains("$originalPackage.$oldClass") -> {
@@ -212,9 +220,16 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             }
         }
 
-        // 2f. Quét dự phòng: Nếu có chuỗi nào chứa chính xác originalPackage mà không phải class trong DEX thì đổi
+        // 2f. Đặt Application class wrapper nếu có
+        if (newApplicationClass != null) {
+            for (appIdx in applicationIndices) {
+                modifiedStrings[appIdx] = newApplicationClass
+            }
+        }
+
+        // 2g. Quét dự phòng: Nếu có chuỗi nào chứa chính xác originalPackage mà không phải class trong DEX thì đổi
         for (i in 0 until modifiedStrings.size) {
-            if (!packageIndices.contains(i) && !authorityIndices.contains(i) && !permissionIndices.contains(i) && !usesPermissionIndices.contains(i) && !componentIndices.contains(i)) {
+            if (!packageIndices.contains(i) && !authorityIndices.contains(i) && !permissionIndices.contains(i) && !usesPermissionIndices.contains(i) && !componentIndices.contains(i) && !applicationIndices.contains(i)) {
                 val s = modifiedStrings[i]
                 if (s == originalPackage) {
                     modifiedStrings[i] = newPackage
@@ -243,7 +258,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
 
         val bytes = ByteArray(byteLen)
         buffer.get(bytes)
-        buffer.get() // null terminator
+        buffer.get()
         return String(bytes, Charsets.UTF_8)
     }
 
@@ -259,7 +274,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         for (i in 0 until len) {
             chars[i] = buffer.char
         }
-        buffer.short // null terminator (2 bytes)
+        buffer.short
         return String(chars)
     }
 

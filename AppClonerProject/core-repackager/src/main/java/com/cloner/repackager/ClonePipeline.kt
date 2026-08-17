@@ -11,7 +11,7 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /**
- * Cấu hình thiết lập cho một tác vụ nhân bản ứng dụng.
+ * Cấu hình thiết lập cho một tác vụ nhân bản ứng dụng chuẩn Ultra Edition.
  */
 data class CloneConfig(
     val originalPackageName: String,
@@ -19,6 +19,8 @@ data class CloneConfig(
     val newAppName: String,
     val cloneNumber: Int = 1,
     val modifiedIconBytes: ByteArray? = null,
+    val runtimeDexBytes: ByteArray? = null,
+    val originalSignatureBase64: String? = null,
     // Thông số định danh cơ bản
     val fakeAndroidId: String? = null,
     val fakeImei: String? = null,
@@ -35,16 +37,41 @@ data class CloneConfig(
     // Proxy mạng cố định theo app
     val proxyHost: String? = null,
     val proxyPort: Int? = null,
-    val proxyType: String? = "HTTP"
+    val proxyType: String? = "HTTP",
+    val unpinSsl: Boolean = true
 )
 
 /**
- * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK.
+ * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK chuẩn Ultra Edition.
+ * Hỗ trợ: DEX Injection, Signature Spoofing, SSL Unpinning, OBB Auto-copy, Zero-OOM Streaming.
  */
 class ClonePipeline(private val config: CloneConfig) {
 
     interface ProgressListener {
         fun onProgress(step: String, percentage: Int)
+    }
+
+    companion object {
+        fun splitOutputDirFor(baseOutputFile: File): File {
+            val parent = baseOutputFile.parentFile ?: File(".")
+            return File(parent, "${baseOutputFile.nameWithoutExtension}_splits")
+        }
+
+        fun installFilesFor(baseOutputFile: File): List<File> {
+            val list = mutableListOf<File>()
+            if (baseOutputFile.exists()) {
+                list.add(baseOutputFile)
+            }
+            val splitDir = splitOutputDirFor(baseOutputFile)
+            if (splitDir.exists() && splitDir.isDirectory) {
+                val splits = splitDir.listFiles { f -> f.isFile && f.name.endsWith(".apk") }
+                if (splits != null) {
+                    splits.sortBy { it.name }
+                    list.addAll(splits)
+                }
+            }
+            return list
+        }
     }
 
     fun execute(sourceApks: List<File>, outputApk: File, listener: ProgressListener? = null) {
@@ -53,35 +80,34 @@ class ClonePipeline(private val config: CloneConfig) {
         }
 
         outputApk.parentFile?.mkdirs()
-        val estimatedMergedSize = sourceApks.sumOf { if (it.exists()) it.length() else 0L }
-        val requiredWorkingSpace = if (estimatedMergedSize > Long.MAX_VALUE / 3L) {
-            Long.MAX_VALUE
-        } else {
-            estimatedMergedSize * 3L + (64L * 1024L * 1024L)
-        }
-        val usableSpace = outputApk.parentFile?.usableSpace ?: 0L
-        if (usableSpace > 0L && usableSpace < requiredWorkingSpace) {
-            throw IOException(
-                "Không đủ dung lượng trống để clone. Cần khoảng ${requiredWorkingSpace / (1024 * 1024)} MiB, " +
-                        "hiện còn ${usableSpace / (1024 * 1024)} MiB"
-            )
-        }
         val tempUnsignedApk = File(outputApk.parentFile, "temp_unsigned_${System.currentTimeMillis()}.apk")
 
         try {
             listener?.onProgress("Đang phân tích cấu trúc APK & trích xuất DEX classes...", 10)
 
-            // Bước 1: Trích xuất toàn bộ danh sách lớp bytecode từ các file DEX
             val dexClasses = HashSet<String>()
             val baseApk = sourceApks[0]
             val baseZip = ZipFile(baseApk)
             var baseEntries = baseZip.entries()
 
+            var maxDexIndex = 1
             while (baseEntries.hasMoreElements()) {
                 val entry = baseEntries.nextElement()
-                if (entry.name.endsWith(".dex")) {
+                val entryName = entry.name
+                if (entryName.endsWith(".dex")) {
                     val dexBytes = baseZip.getInputStream(entry).use { it.readBytes() }
                     dexClasses.addAll(DexClassParser.extractClasses(dexBytes))
+
+                    val dexNum = if (entryName == "classes.dex") {
+                        1
+                    } else if (entryName.startsWith("classes") && entryName.endsWith(".dex")) {
+                        entryName.removePrefix("classes").removeSuffix(".dex").toIntOrNull() ?: 1
+                    } else {
+                        1
+                    }
+                    if (dexNum > maxDexIndex) {
+                        maxDexIndex = dexNum
+                    }
                 }
             }
 
@@ -102,20 +128,17 @@ class ClonePipeline(private val config: CloneConfig) {
                 }
             }
 
-            val zipOut = ZipOutputStream(FileOutputStream(tempUnsignedApk))
-            val buffer = ByteArray(8192)
-            listener?.onProgress("Đang tái cấu trúc AndroidManifest, resources.arsc & Icon...", 30)
+            val zipOut = ZipOutputStream(BufferedOutputStream(FileOutputStream(tempUnsignedApk), 65536))
+            val buffer = ByteArray(65536)
+            var originalAppClass: String? = null
+
+            listener?.onProgress("Đang tái cấu trúc AndroidManifest & Icon...", 30)
 
             // Bước 2: Tái tạo Base APK
             baseEntries = baseZip.entries()
             while (baseEntries.hasMoreElements()) {
                 val entry = baseEntries.nextElement()
                 val entryName = entry.name
-
-                // Nếu đầu vào đã từng được clone, cấu hình mới sẽ được ghi lại ở cuối pipeline.
-                if (entryName == "assets/cloner_runtime_config.json") {
-                    continue
-                }
 
                 val isIconImage = config.modifiedIconBytes != null &&
                         (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
@@ -127,12 +150,14 @@ class ClonePipeline(private val config: CloneConfig) {
                     entryName == "AndroidManifest.xml" -> {
                         val manifestBytes = baseZip.getInputStream(entry).use { it.readBytes() }
                         val editor = AxmlEditor(manifestBytes)
+                        val targetAppWrapper = if (config.runtimeDexBytes != null) "com.cloner.runtime.AppClonerApplication" else null
                         val modifiedManifest = editor.modifyManifest(
                             originalPackage = config.originalPackageName,
                             newPackage = config.newPackageName,
                             dexClasses = dexClasses,
-                            newApplicationClass = "com.cloner.runtime.AppClonerApplication"
+                            newApplicationClass = targetAppWrapper
                         )
+                        originalAppClass = editor.originalApplicationClass
 
                         val newEntry = ZipEntry(entryName)
                         zipOut.putNextEntry(newEntry)
@@ -140,14 +165,9 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // resources.arsc: GIỮ NGUYÊN 100% package gốc!
-                    // Lý do: R.class trong DEX bytecode đã hardcode resource ID (0x7fXXYYZZ)
-                    // liên kết với package name gốc trong bảng tài nguyên.
-                    // Nếu đổi package trong ARSC -> AssetManager không map được R.id -> crash ngay!
-                    // Manifest package (Application ID) và ARSC package (Resource Table) có thể khác nhau.
+                    // resources.arsc: GIỮ NGUYÊN GỐC để R.id bytecode hoạt động trơn tru
                     entryName == "resources.arsc" -> {
                         val arscBytes = baseZip.getInputStream(entry).use { it.readBytes() }
-
                         val newEntry = ZipEntry(entryName)
                         newEntry.method = ZipEntry.STORED
                         newEntry.size = arscBytes.size.toLong()
@@ -174,7 +194,7 @@ class ClonePipeline(private val config: CloneConfig) {
                         // Bỏ qua
                     }
 
-                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs, Adaptive Icon XML)
+                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs)
                     else -> {
                         val newEntry = ZipEntry(entryName)
                         if (entry.method == ZipEntry.STORED) {
@@ -196,20 +216,29 @@ class ClonePipeline(private val config: CloneConfig) {
             }
             baseZip.close()
 
-            // Bước 3: Nhúng cấu hình Runtime vào base APK. Split APK phải được giữ
-            // riêng vì mỗi split có manifest/resource table và split name riêng.
-            listener?.onProgress("Đang nhúng cấu hình vào base APK...", 50)
-            injectRuntimeConfig(zipOut)
+            // Bước 3: Tiêm Runtime DEX vào file classesN.dex tiếp theo
+            if (config.runtimeDexBytes != null) {
+                listener?.onProgress("Đang tiêm ma trận Hook Ultra Runtime vào DEX...", 45)
+                val injectedDexName = "classes${maxDexIndex + 1}.dex"
+                val dexEntry = ZipEntry(injectedDexName)
+                zipOut.putNextEntry(dexEntry)
+                zipOut.write(config.runtimeDexBytes)
+                zipOut.closeEntry()
+            }
+
+            // Bước 4: Nhúng cấu hình Runtime giả lập
+            listener?.onProgress("Đang nhúng cấu hình Signature Spoofing & Device Identity...", 55)
+            injectRuntimeConfig(zipOut, originalAppClass)
 
             zipOut.close()
 
-            // Bước 4: Ký base APK
-            listener?.onProgress("Đang ký base APK...", 60)
-            ApkSignerHelper.signApk(tempUnsignedApk, outputApk) { step, signPercentage ->
-                listener?.onProgress(step, 60 + (signPercentage * 15 / 100))
+            // Bước 5: Ký số Base APK
+            listener?.onProgress("Đang ký số APK (Streaming Zero-OOM)...", 65)
+            ApkSignerHelper.signApk(tempUnsignedApk, outputApk) { step, percentage ->
+                listener?.onProgress(step, 65 + (percentage * 15 / 100))
             }
 
-            // Bước 5: Repackage và ký từng split độc lập bằng cùng certificate.
+            // Bước 6: Xử lý và ký các Split APKs nếu có
             val splitOutputDir = splitOutputDirFor(outputApk)
             clearSplitOutputDir(splitOutputDir)
             if (sourceApks.size > 1) {
@@ -220,13 +249,16 @@ class ClonePipeline(private val config: CloneConfig) {
                     if (!splitFile.exists()) continue
                     val safeName = splitFile.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
                     val splitOutput = File(splitOutputDir, "${i}_$safeName")
-                    val percentage = 75 + ((i - 1) * 24 / splitCount)
-                    listener?.onProgress("Đang xử lý split $i/$splitCount: ${splitFile.name}", percentage)
+                    val percentage = 80 + ((i - 1) * 15 / splitCount)
+                    listener?.onProgress("Đang ký split $i/$splitCount: ${splitFile.name}", percentage)
                     cloneSplitApk(splitFile, splitOutput, dexClasses)
                 }
             }
 
-            listener?.onProgress("Hoàn thành quá trình Clone APK!", 100)
+            // Bước 7: Tự động sao chép thư mục OBB (nếu có)
+            copyObbDirectoryIfExists(config.originalPackageName, config.newPackageName)
+
+            listener?.onProgress("Hoàn thành quá trình Clone APK Ultra Edition!", 100)
 
         } finally {
             if (tempUnsignedApk.exists()) {
@@ -239,105 +271,92 @@ class ClonePipeline(private val config: CloneConfig) {
         val tempUnsigned = File(outputApk.parentFile, "temp_${outputApk.name}")
         try {
             ZipFile(sourceApk).use { zipIn ->
-                ZipOutputStream(BufferedOutputStream(FileOutputStream(tempUnsigned))).use { zipOut ->
+                ZipOutputStream(BufferedOutputStream(FileOutputStream(tempUnsigned), 65536)).use { zipOut ->
                     val entries = zipIn.entries()
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(65536)
                     while (entries.hasMoreElements()) {
                         val entry = entries.nextElement()
                         val entryName = entry.name
-                        if (entryName == "assets/cloner_runtime_config.json" || isOldSignature(entryName)) {
+                        if (entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF") || entryName.endsWith(".DSA"))) {
                             continue
                         }
 
-                        val isIconImage = config.modifiedIconBytes != null &&
-                                (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
-                                (entryName.contains("ic_launcher") || entryName.contains("icon") ||
-                                        entryName.contains("logo") || entryName.contains("app_icon")) &&
-                                entryName.endsWith(".png")
-
-                        when {
-                            entryName == "AndroidManifest.xml" -> {
-                                val manifest = zipIn.getInputStream(entry).use { it.readBytes() }
-                                val modified = AxmlEditor(manifest).modifyManifest(
-                                    originalPackage = config.originalPackageName,
-                                    newPackage = config.newPackageName,
-                                    dexClasses = dexClasses,
-                                    newApplicationClass = null
-                                )
-                                zipOut.putNextEntry(ZipEntry(entryName))
-                                zipOut.write(modified)
-                                zipOut.closeEntry()
+                        if (entryName == "AndroidManifest.xml") {
+                            val manifestBytes = zipIn.getInputStream(entry).use { it.readBytes() }
+                            val editor = AxmlEditor(manifestBytes)
+                            val modifiedManifest = editor.modifyManifest(
+                                originalPackage = config.originalPackageName,
+                                newPackage = config.newPackageName,
+                                dexClasses = dexClasses,
+                                newApplicationClass = null
+                            )
+                            val newEntry = ZipEntry(entryName)
+                            zipOut.putNextEntry(newEntry)
+                            zipOut.write(modifiedManifest)
+                            zipOut.closeEntry()
+                        } else {
+                            val newEntry = ZipEntry(entryName)
+                            if (entry.method == ZipEntry.STORED) {
+                                newEntry.method = ZipEntry.STORED
+                                newEntry.size = entry.size
+                                newEntry.compressedSize = entry.size
+                                newEntry.crc = entry.crc
                             }
-
-                            isIconImage -> {
-                                zipOut.putNextEntry(ZipEntry(entryName))
-                                zipOut.write(config.modifiedIconBytes)
-                                zipOut.closeEntry()
+                            zipOut.putNextEntry(newEntry)
+                            zipIn.getInputStream(entry).use { inputStream ->
+                                var read: Int
+                                while (inputStream.read(buffer).also { read = it } != -1) {
+                                    zipOut.write(buffer, 0, read)
+                                }
                             }
-
-                            else -> copyZipEntry(zipIn, zipOut, entry, buffer)
+                            zipOut.closeEntry()
                         }
                     }
                 }
             }
             ApkSignerHelper.signApk(tempUnsigned, outputApk)
         } finally {
-            if (tempUnsigned.exists()) tempUnsigned.delete()
-        }
-    }
-
-    private fun copyZipEntry(zipIn: ZipFile, zipOut: ZipOutputStream, entry: ZipEntry, buffer: ByteArray) {
-        val newEntry = ZipEntry(entry.name)
-        if (entry.method == ZipEntry.STORED) {
-            newEntry.method = ZipEntry.STORED
-            newEntry.size = entry.size
-            newEntry.compressedSize = entry.size
-            newEntry.crc = entry.crc
-        }
-        zipOut.putNextEntry(newEntry)
-        zipIn.getInputStream(entry).use { input ->
-            var bytesRead: Int
-            while (input.read(buffer).also { bytesRead = it } != -1) {
-                zipOut.write(buffer, 0, bytesRead)
+            if (tempUnsigned.exists()) {
+                tempUnsigned.delete()
             }
         }
-        zipOut.closeEntry()
     }
 
-    private fun isOldSignature(entryName: String): Boolean {
-        if (!entryName.startsWith("META-INF/")) return false
-        val upper = entryName.uppercase()
-        return upper.endsWith(".SF") || upper.endsWith(".RSA") ||
-                upper.endsWith(".DSA") || upper.endsWith(".MF")
-    }
-
-    private fun clearSplitOutputDir(directory: File) {
-        if (!directory.exists()) return
-        directory.listFiles()?.forEach { child ->
-            if (child.isFile) child.delete()
-        }
-        directory.delete()
-    }
-
-    companion object {
-        fun splitOutputDirFor(baseApk: File): File =
-            File(baseApk.parentFile, "${baseApk.nameWithoutExtension}_splits")
-
-        fun installFilesFor(baseApk: File): List<File> {
-            val splits = splitOutputDirFor(baseApk).listFiles()
-                ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
-                ?.sortedBy { it.name }
-                ?: emptyList()
-            return listOf(baseApk) + splits
+    private fun clearSplitOutputDir(dir: File) {
+        if (dir.exists()) {
+            dir.listFiles()?.forEach { it.delete() }
+            dir.delete()
         }
     }
 
-    private fun injectRuntimeConfig(zipOut: ZipOutputStream) {
+    private fun copyObbDirectoryIfExists(origPkg: String, newPkg: String) {
+        try {
+            val obbBase = File("/storage/emulated/0/Android/obb")
+            val origObbDir = File(obbBase, origPkg)
+            if (origObbDir.exists() && origObbDir.isDirectory) {
+                val newObbDir = File(obbBase, newPkg)
+                newObbDir.mkdirs()
+                origObbDir.listFiles()?.forEach { file ->
+                    if (file.isFile) {
+                        val newFileName = file.name.replace(origPkg, newPkg)
+                        val targetFile = File(newObbDir, newFileName)
+                        if (!targetFile.exists()) {
+                            file.copyTo(targetFile, overwrite = true)
+                        }
+                    }
+                }
+            }
+        } catch (ignored: Exception) {}
+    }
+
+    private fun injectRuntimeConfig(zipOut: ZipOutputStream, originalAppClass: String?) {
         val configJson = """
             {
                 "originalPackageName": "${config.originalPackageName}",
                 "newPackageName": "${config.newPackageName}",
                 "cloneNumber": ${config.cloneNumber},
+                "originalApplicationClass": "${originalAppClass ?: ""}",
+                "originalSignatureBase64": "${config.originalSignatureBase64 ?: ""}",
                 "fakeAndroidId": "${config.fakeAndroidId ?: ""}",
                 "fakeImei": "${config.fakeImei ?: ""}",
                 "fakeMacAddress": "${config.fakeMacAddress ?: ""}",
@@ -351,7 +370,8 @@ class ClonePipeline(private val config: CloneConfig) {
                 "fakeImsi": "${config.fakeImsi ?: ""}",
                 "proxyHost": "${config.proxyHost ?: ""}",
                 "proxyPort": ${config.proxyPort ?: 0},
-                "proxyType": "${config.proxyType ?: "HTTP"}"
+                "proxyType": "${config.proxyType ?: "HTTP"}",
+                "unpinSsl": ${config.unpinSsl}
             }
         """.trimIndent()
 

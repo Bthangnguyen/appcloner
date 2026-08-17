@@ -2,6 +2,7 @@ package com.cloner.app.util
 
 import android.app.Activity
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
@@ -10,85 +11,124 @@ import android.provider.Settings
 import android.widget.Toast
 import com.cloner.repackager.ClonePipeline
 import java.io.File
+import java.io.FileInputStream
 
-/** Installs one base APK and all of its preserved split APKs in a single session. */
+/**
+ * SplitApkInstaller: Bộ cài đặt Split APKs / App Bundles chuẩn Android qua PackageInstaller Session.
+ * Cho phép nạp đồng thời Base APK + Toàn bộ Split Config APKs trong một phiên cài đặt duy nhất.
+ */
 object SplitApkInstaller {
 
-    fun install(activity: Activity, baseApk: File, packageName: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !activity.packageManager.canRequestPackageInstalls()
-        ) {
-            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                data = Uri.parse("package:${activity.packageName}")
-            })
-            Toast.makeText(
-                activity,
-                "Vui lòng cấp quyền cài ứng dụng không rõ nguồn gốc rồi thử lại",
-                Toast.LENGTH_LONG
-            ).show()
+    fun install(context: Context, baseApk: File, targetPackageName: String) {
+        val allFiles = ClonePipeline.installFilesFor(baseApk)
+        if (allFiles.size > 1) {
+            // Có split APKs -> Sử dụng Session-based PackageInstaller
+            installSplitApks(context, allFiles) { success, msg ->
+                if (!success) {
+                    Toast.makeText(context, "Lỗi cài đặt Split APK: $msg", Toast.LENGTH_LONG).show()
+                }
+            }
+        } else {
+            // File APK đơn -> Dùng PackageInstaller Intent
+            installSingleOrSession(context, baseApk)
+        }
+    }
+
+    private fun installSingleOrSession(context: Context, file: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!context.packageManager.canRequestPackageInstalls()) {
+                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(intent)
+                    Toast.makeText(context, "Vui lòng cho phép quyền 'Cài đặt ứng dụng không rõ nguồn gốc' rồi bấm cài đặt lại", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+
+            val apkUri = AppClonerFileProvider.getUriForFile(file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Lỗi khởi động cài đặt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun installSplitApks(context: Context, apkFiles: List<File>, onResult: ((Boolean, String?) -> Unit)? = null) {
+        if (apkFiles.isEmpty()) {
+            onResult?.invoke(false, "Không có tệp APK nào để cài đặt")
             return
         }
 
-        val installFiles = ClonePipeline.installFilesFor(baseApk).filter { it.exists() }
-        if (installFiles.isEmpty()) {
-            Toast.makeText(activity, "Không tìm thấy APK để cài đặt", Toast.LENGTH_LONG).show()
-            return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!context.packageManager.canRequestPackageInstalls()) {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+                Toast.makeText(context, "Vui lòng cho phép quyền 'Cài đặt ứng dụng không rõ nguồn gốc' rồi bấm cài đặt lại", Toast.LENGTH_LONG).show()
+                onResult?.invoke(false, "Cần cấp quyền cài đặt ứng dụng không rõ nguồn gốc")
+                return
+            }
         }
 
-        val installer = activity.packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setAppPackageName(packageName)
-            setSize(installFiles.sumOf { it.length() })
-            setAppLabel(baseApk.nameWithoutExtension)
+        val packageInstaller = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+
+        var totalSize = 0L
+        for (file in apkFiles) {
+            if (file.exists()) {
+                totalSize += file.length()
+            }
         }
+        params.setSize(totalSize)
 
         var sessionId = -1
+        var session: PackageInstaller.Session? = null
+
         try {
-            sessionId = installer.createSession(params)
-            val session = installer.openSession(sessionId)
-            try {
-                installFiles.forEachIndexed { index, file ->
-                    val sessionName = if (index == 0) "base.apk" else "split_${index}.apk"
-                    file.inputStream().buffered().use { input ->
-                        session.openWrite(sessionName, 0L, file.length()).use { output ->
-                            input.copyTo(output, 64 * 1024)
-                            session.fsync(output)
-                        }
+            sessionId = packageInstaller.createSession(params)
+            session = packageInstaller.openSession(sessionId)
+
+            val buffer = ByteArray(65536)
+
+            for ((index, file) in apkFiles.withIndex()) {
+                if (!file.exists()) continue
+                val entryName = if (index == 0) "base.apk" else "split_${index}_${file.name}"
+                val out = session.openWrite(entryName, 0, file.length())
+                FileInputStream(file).use { input ->
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        out.write(buffer, 0, bytesRead)
                     }
+                    session.fsync(out)
                 }
-
-                val callbackIntent = Intent(activity, InstallStatusReceiver::class.java).apply {
-                    action = InstallStatusReceiver.ACTION_INSTALL_STATUS
-                    putExtra(InstallStatusReceiver.EXTRA_EXPECTED_SESSION_ID, sessionId)
-                }
-                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
-                val statusReceiver = PendingIntent.getBroadcast(
-                    activity,
-                    sessionId,
-                    callbackIntent,
-                    flags
-                )
-                session.commit(statusReceiver.intentSender)
-            } finally {
-                session.close()
+                out.close()
             }
 
-            val splitCount = installFiles.size - 1
-            val message = if (splitCount > 0) {
-                "Đang chuẩn bị cài base APK cùng $splitCount split APK..."
+            // Tạo Intent kết quả cài đặt
+            val intent = Intent(context, context.javaClass)
+            intent.action = "com.cloner.app.INSTALL_COMPLETE"
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             } else {
-                "Đang chuẩn bị cài APK..."
+                PendingIntent.FLAG_UPDATE_CURRENT
             }
-            Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
+            val pendingIntent = PendingIntent.getActivity(context, sessionId, intent, flags)
+
+            session.commit(pendingIntent.intentSender)
+            session.close()
+            onResult?.invoke(true, "Đã gửi yêu cầu cài đặt gói Split APKs tới hệ thống")
+
         } catch (e: Exception) {
-            if (sessionId != -1) {
-                try {
-                    installer.abandonSession(sessionId)
-                } catch (ignored: Exception) {
-                }
-            }
-            Toast.makeText(activity, "Không thể tạo phiên cài đặt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            try {
+                session?.abandon()
+            } catch (ignored: Exception) {}
+            onResult?.invoke(false, "Lỗi tạo phiên cài đặt: ${e.localizedMessage}")
         }
     }
 }
