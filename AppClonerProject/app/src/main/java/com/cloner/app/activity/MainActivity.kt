@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private lateinit var tvClonedCount: TextView
     private lateinit var tvEmptyCloned: TextView
     private lateinit var btnRefreshCloned: Button
+    private lateinit var btnViewLogs: Button
     private lateinit var clonedAdapter: ClonedAppAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,6 +85,11 @@ class MainActivity : Activity() {
         tvClonedCount = findViewById(R.id.tvClonedCount)
         tvEmptyCloned = findViewById(R.id.tvEmptyCloned)
         btnRefreshCloned = findViewById(R.id.btnRefreshCloned)
+        btnViewLogs = findViewById(R.id.btnViewLogs)
+
+        btnViewLogs.setOnClickListener {
+            showLogViewerDialog()
+        }
     }
 
     private fun setupTabs() {
@@ -403,5 +409,74 @@ class MainActivity : Activity() {
 
             return view
         }
+    }
+
+    private fun showLogViewerDialog() {
+        val sb = StringBuilder()
+
+        // 1. Đọc latest_clone.log
+        try {
+            val cloneLog = File(getExternalFilesDir(null), "latest_clone.log")
+            if (cloneLog.exists()) {
+                sb.append("=== LATEST CLONE LOG ===\n")
+                sb.append(cloneLog.readText().takeLast(3000))
+                sb.append("\n\n")
+            }
+        } catch (ignored: Exception) {}
+
+        // 2. Đọc clone_error.log trong Download / App files
+        try {
+            val downloadErr = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "clone_error.log")
+            if (downloadErr.exists()) {
+                sb.append("=== DOWNLOAD CRASH LOG ===\n")
+                sb.append(downloadErr.readText().takeLast(3000))
+                sb.append("\n\n")
+            }
+        } catch (ignored: Exception) {}
+
+        // 3. Đọc clone_runtime.log
+        try {
+            val runtimeLog = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "clone_runtime.log")
+            if (runtimeLog.exists()) {
+                sb.append("=== RUNTIME INIT LOG ===\n")
+                sb.append(runtimeLog.readText().takeLast(2000))
+                sb.append("\n\n")
+            }
+        } catch (ignored: Exception) {}
+
+        // 4. Đọc logcat runtime errors
+        try {
+            val process = Runtime.getRuntime().exec("logcat -d -v time -t 150 AndroidRuntime:E ActivityManager:E *:F")
+            val logcatStr = process.inputStream.bufferedReader().use { it.readText() }
+            if (logcatStr.isNotBlank()) {
+                sb.append("=== SYSTEM LOGCAT (RECENT ERRORS) ===\n")
+                sb.append(logcatStr.takeLast(6000))
+            }
+        } catch (ignored: Exception) {}
+
+        val finalLog = if (sb.isNotBlank()) sb.toString() else "Chưa có log lỗi nào được ghi nhận.\n\nHãy thử mở app clone bị lỗi rồi quay lại đây bấm 'XEM LOG'!"
+
+        val scrollView = ScrollView(this).apply {
+            setPadding(24, 24, 24, 24)
+        }
+        val tvLog = TextView(this).apply {
+            text = finalLog
+            setTextIsSelectable(true)
+            textSize = 11f
+            setTextColor(0xFF212121.toInt())
+        }
+        scrollView.addView(tvLog)
+
+        AlertDialog.Builder(this)
+            .setTitle("Nhật Ký Lỗi Hệ Thống & Clone")
+            .setView(scrollView)
+            .setPositiveButton("Sao chép Log") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("Clone Log", finalLog)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(this, "Đã sao chép log vào bộ nhớ tạm!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Đóng", null)
+            .show()
     }
 }
