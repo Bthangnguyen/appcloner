@@ -132,9 +132,8 @@ object ApkSignerHelper {
         val eocdPos = findEocdPosition(apkBytes)
         if (eocdPos == -1) throw IllegalStateException("Không tìm thấy ZIP EOCD trong APK")
 
-        val eocdBuf = ByteBuffer.wrap(apkBytes, eocdPos, apkBytes.size - eocdPos).order(ByteOrder.LITTLE_ENDIAN)
-        val cdSize = eocdBuf.getInt(12)
-        val cdOffset = eocdBuf.getInt(16)
+        val cdSize = ByteBuffer.wrap(apkBytes, eocdPos + 12, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val cdOffset = ByteBuffer.wrap(apkBytes, eocdPos + 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
         val sec1 = apkBytes.copyOfRange(0, cdOffset)
         val sec2 = apkBytes.copyOfRange(cdOffset, cdOffset + cdSize)
@@ -195,8 +194,7 @@ object ApkSignerHelper {
 
         // Cập nhật cdOffset trong EOCD mới
         val finalSec3 = sec3Original.clone()
-        val finalEocdBuf = ByteBuffer.wrap(finalSec3).order(ByteOrder.LITTLE_ENDIAN)
-        finalEocdBuf.putInt(16, cdOffset + signingBlock.size)
+        ByteBuffer.wrap(finalSec3, 16, 4).order(ByteOrder.LITTLE_ENDIAN).putInt(cdOffset + signingBlock.size)
 
         // Ghi tệp APK thành phẩm đã ký kép v1 + v2
         FileOutputStream(outputApk).use { fos ->
