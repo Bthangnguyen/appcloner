@@ -5,10 +5,13 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * AxmlEditor: Trình phân tích và sửa đổi trực tiếp tệp AndroidManifest.xml nhị phân (Binary AXML).
- * - Sử dụng danh sách dexClasses để giữ nguyên các class bytecode thực tế, tránh ClassNotFoundException
- * - Tự động đổi toàn bộ ContentProvider authorities và Permissions sang newPackage để tránh xung đột
- * - Xóa cờ SORTED và mã hóa Varint UTF-8 / UTF-16 chuẩn xác 100%
+ * AxmlEditor: Trình phân tích cú pháp và chỉnh sửa cấu trúc Cây nhị phân AndroidManifest.xml (AXML Tree Editor).
+ * - Sử dụng duyệt cây thẻ XML (Tag & Attributes) chuẩn xác 100%
+ * - Định vị chính xác attribute `package` của thẻ `<manifest>`
+ * - Định vị chính xác attribute `authorities` của tất cả thẻ `<provider>` (kể cả AdMob, Firebase, FileProvider...)
+ * - Định vị chính xác attribute `name` của tất cả thẻ `<permission>` và `<uses-permission>`
+ * - Mở rộng toàn bộ class name relative (.MainActivity -> com.orig.MainActivity)
+ * - Giữ nguyên toàn bộ các class bytecode khác để DEX thực thi trơn tru
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
@@ -51,7 +54,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         }
 
         val poolDataStart = 8 + stringsStart
-        val stringsList = mutableListOf<String>()
+        val stringsList = ArrayList<String>(stringCount)
 
         for (i in 0 until stringCount) {
             val offset = poolDataStart + stringOffsets[i]
@@ -60,41 +63,127 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             stringsList.add(str)
         }
 
-        // Biến đổi chuỗi thông minh đối chiếu với DEX Class Table
-        val modifiedStrings = stringsList.map { originalStr ->
-            when {
-                // 1. Tên package gốc -> Tên package clone mới
-                originalStr == originalPackage -> newPackage
+        // Bước 1: Duyệt cây XML để thu thập các chỉ số chuỗi cần biến đổi
+        val packageIndices = HashSet<Int>()
+        val authorityIndices = HashSet<Int>()
+        val permissionIndices = HashSet<Int>()
+        val usesPermissionIndices = HashSet<Int>()
+        val componentIndices = HashSet<Int>()
 
-                // 2. Class relative (".MainActivity") -> Mở rộng thành "originalPackage.MainActivity"
-                originalStr.startsWith(".") -> "$originalPackage$originalStr"
+        var idx = 8 + stringPoolSize
+        while (idx < manifestBytes.size - 8) {
+            val chunkType = ByteBuffer.wrap(manifestBytes, idx, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+            val chunkSize = ByteBuffer.wrap(manifestBytes, idx + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
-                // 3. Nếu là class bytecode có trong DEX -> GIỮ NGUYÊN 100% để ClassLoader khởi chạy được!
-                dexClasses.contains(originalStr) -> originalStr
+            if (chunkType == 0x0102 && idx + 30 <= manifestBytes.size) { // XML_START_ELEMENT
+                val tagNameIdx = ByteBuffer.wrap(manifestBytes, idx + 20, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                val attrStart = ByteBuffer.wrap(manifestBytes, idx + 24, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                val attrSize = ByteBuffer.wrap(manifestBytes, idx + 26, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                val attrCount = ByteBuffer.wrap(manifestBytes, idx + 28, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
 
-                // 4. Custom permissions & receiver permissions của app -> Thay bằng newPackage
-                originalStr.startsWith(originalPackage) && (originalStr.contains("permission") || originalStr.contains("DYNAMIC_RECEIVER") || originalStr.contains("PROTECTED")) -> {
-                    originalStr.replace(originalPackage, newPackage)
-                }
+                val tagName = if (tagNameIdx in 0 until stringsList.size) stringsList[tagNameIdx] else ""
+                val attrOffset = idx + 16 + attrStart
 
-                // 5. ContentProvider authorities & AndroidX startup -> Thay bằng newPackage
-                originalStr.contains("provider") || originalStr.contains("fileprovider") || originalStr.contains("startup") || originalStr.contains("authorit") -> {
-                    if (originalStr.startsWith(originalPackage)) {
-                        originalStr.replace(originalPackage, newPackage)
-                    } else if (!originalStr.endsWith(authoritySuffix)) {
-                        "$originalStr$authoritySuffix"
-                    } else {
-                        originalStr
+                for (a in 0 until attrCount) {
+                    val aOff = attrOffset + (a * attrSize)
+                    if (aOff + 20 <= manifestBytes.size) {
+                        val aNameIdx = ByteBuffer.wrap(manifestBytes, aOff + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                        val aRawValIdx = ByteBuffer.wrap(manifestBytes, aOff + 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                        val tvType = manifestBytes[aOff + 15].toInt() and 0xFF
+                        val tvData = ByteBuffer.wrap(manifestBytes, aOff + 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
+
+                        val valIdx = if (aRawValIdx != -1 && aRawValIdx in 0 until stringsList.size) {
+                            aRawValIdx
+                        } else if (tvType == 3 && tvData in 0 until stringsList.size) {
+                            tvData
+                        } else {
+                            -1
+                        }
+
+                        if (valIdx != -1) {
+                            val attrName = if (aNameIdx in 0 until stringsList.size) stringsList[aNameIdx] else ""
+
+                            when {
+                                tagName == "manifest" && attrName == "package" -> packageIndices.add(valIdx)
+                                tagName == "provider" && attrName == "authorities" -> authorityIndices.add(valIdx)
+                                tagName == "permission" && attrName == "name" -> permissionIndices.add(valIdx)
+                                tagName == "uses-permission" && attrName == "name" -> usesPermissionIndices.add(valIdx)
+                                (tagName == "activity" || tagName == "service" || tagName == "receiver" || tagName == "provider" || tagName == "application") && attrName == "name" -> componentIndices.add(valIdx)
+                            }
+                        }
                     }
                 }
+            }
 
-                // 6. Các chuỗi bắt đầu bằng originalPackage mà không phải class bytecode -> Thay bằng newPackage
-                originalStr.startsWith(originalPackage) && !dexClasses.contains(originalStr) -> {
-                    originalStr.replace(originalPackage, newPackage)
+            if (chunkSize <= 0) break
+            idx += chunkSize
+        }
+
+        // Bước 2: Biến đổi danh sách chuỗi dựa trên phân tích cấu trúc cây
+        val modifiedStrings = ArrayList<String>(stringsList)
+
+        // 2a. Đổi package của manifest
+        for (pIdx in packageIndices) {
+            modifiedStrings[pIdx] = newPackage
+        }
+
+        // 2b. Đổi toàn bộ authorities của ContentProviders
+        for (aIdx in authorityIndices) {
+            val oldAuth = stringsList[aIdx]
+            modifiedStrings[aIdx] = if (oldAuth.contains(originalPackage)) {
+                oldAuth.replace(originalPackage, newPackage)
+            } else if (!oldAuth.endsWith(authoritySuffix)) {
+                "$oldAuth$authoritySuffix"
+            } else {
+                oldAuth
+            }
+        }
+
+        // 2c. Đổi custom permissions
+        val customPerms = HashSet<String>()
+        for (permi in permissionIndices) {
+            val oldPerm = stringsList[permi]
+            customPerms.add(oldPerm)
+            modifiedStrings[permi] = if (oldPerm.contains(originalPackage)) {
+                oldPerm.replace(originalPackage, newPackage)
+            } else if (!oldPerm.endsWith(authoritySuffix)) {
+                "$oldPerm$authoritySuffix"
+            } else {
+                oldPerm
+            }
+        }
+
+        // 2d. Đổi uses-permission khớp với custom permissions
+        for (upi in usesPermissionIndices) {
+            val oldUp = stringsList[upi]
+            if (customPerms.contains(oldUp) || oldUp.startsWith(originalPackage)) {
+                modifiedStrings[upi] = if (oldUp.contains(originalPackage)) {
+                    oldUp.replace(originalPackage, newPackage)
+                } else if (!oldUp.endsWith(authoritySuffix)) {
+                    "$oldUp$authoritySuffix"
+                } else {
+                    oldUp
                 }
+            }
+        }
 
-                // 7. Mọi chuỗi khác giữ nguyên
-                else -> originalStr
+        // 2e. Mở rộng tên lớp tương đối (.MainActivity -> com.orig.MainActivity)
+        for (cIdx in componentIndices) {
+            val oldClass = stringsList[cIdx]
+            if (oldClass.startsWith(".")) {
+                modifiedStrings[cIdx] = "$originalPackage$oldClass"
+            }
+        }
+
+        // 2f. Quét dự phòng: Nếu có chuỗi nào chứa chính xác originalPackage mà không phải class trong DEX thì đổi
+        for (i in 0 until modifiedStrings.size) {
+            if (!packageIndices.contains(i) && !authorityIndices.contains(i) && !permissionIndices.contains(i) && !usesPermissionIndices.contains(i) && !componentIndices.contains(i)) {
+                val s = modifiedStrings[i]
+                if (s == originalPackage) {
+                    modifiedStrings[i] = newPackage
+                } else if (s.startsWith(originalPackage) && !dexClasses.contains(s) && (s.contains(".provider") || s.contains("permission") || s.contains("startup"))) {
+                    modifiedStrings[i] = s.replace(originalPackage, newPackage)
+                }
             }
         }
 

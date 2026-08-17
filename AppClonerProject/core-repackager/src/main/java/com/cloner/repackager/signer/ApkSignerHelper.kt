@@ -11,18 +11,30 @@ import java.util.zip.ZipOutputStream
 
 /**
  * ApkSignerHelper: Hỗ trợ tự động ký kép (APK Signature Scheme v1 + APK Signature Scheme v2)
- * hoàn toàn độc lập, đảm bảo vượt qua 100% cơ chế kiểm duyệt bảo mật của Android 11, 12, 13, 14+.
+ * với Cặp khóa RSA cố định (Persistent KeyPair), đảm bảo tính nhất quán của chữ ký số khi cập nhật/cài đè app clone.
  */
 object ApkSignerHelper {
+
+    private var cachedKeyPair: KeyPair? = null
+
+    private fun getOrCreateKeyPair(): KeyPair {
+        cachedKeyPair?.let { return it }
+        val keyPairGen = KeyPairGenerator.getInstance("RSA")
+        val seed = "AppClonerStudio_Persistent_Signing_Key_Scheme_V1_V2".toByteArray(Charsets.UTF_8)
+        val sr = SecureRandom.getInstance("SHA1PRNG")
+        sr.setSeed(seed)
+        keyPairGen.initialize(2048, sr)
+        val kp = keyPairGen.generateKeyPair()
+        cachedKeyPair = kp
+        return kp
+    }
 
     fun signApk(inputApk: File, outputApk: File) {
         val tempV1Apk = File(inputApk.parentFile, "temp_v1_${System.currentTimeMillis()}.apk")
         try {
-            // Bước 1: Ký số Scheme v1 (JAR Signature: MANIFEST.MF + CERT.SF + CERT.RSA)
-            val keyPairGen = KeyPairGenerator.getInstance("RSA")
-            keyPairGen.initialize(2048, SecureRandom())
-            val keyPair = keyPairGen.generateKeyPair()
+            val keyPair = getOrCreateKeyPair()
 
+            // Bước 1: Ký số Scheme v1 (JAR Signature: MANIFEST.MF + CERT.SF + CERT.RSA)
             signV1(inputApk, tempV1Apk, keyPair)
 
             // Bước 2: Ký số Scheme v2 (APK Signing Block v2)
@@ -260,7 +272,7 @@ object ApkSignerHelper {
         val pubKeyBytes = keyPair.public.encoded
         val serial = derInt(1)
         val sigAlgo = derSeq(derOid(byteArrayOf(0x2A, 0x86.toByte(), 0x48, 0x86.toByte(), 0xF7.toByte(), 0x0D, 0x01, 0x01, 0x0B)) + derNull())
-        val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner"))))
+        val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner Studio Root CA"))))
         val validity = derSeq(derUtcTime(Date(System.currentTimeMillis() - 86400000L)) + derUtcTime(Date(System.currentTimeMillis() + 86400000L * 365 * 25)))
         val subject = issuer
 
@@ -292,7 +304,7 @@ object ApkSignerHelper {
         val digestAlgos = derSet(digestAlgo)
         val encapContentInfo = derSeq(derOid(oidData))
 
-        val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner"))))
+        val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner Studio Root CA"))))
         val issuerAndSerial = derSeq(issuer + derInt(1))
 
         val signerInfo = derSeq(
@@ -313,7 +325,7 @@ object ApkSignerHelper {
             signerInfos
         )
 
-        return derSeq(derOid(oidSignedData) + derExplicit(0, signedData))
+        return derSeq(oidSignedData + derExplicit(0, signedData))
     }
 
     private fun derLen(len: Int): ByteArray {
