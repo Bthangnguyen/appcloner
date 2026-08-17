@@ -21,16 +21,12 @@ object SplitApkInstaller {
 
     fun install(context: Context, baseApk: File, targetPackageName: String) {
         val allFiles = ClonePipeline.installFilesFor(baseApk)
-        if (allFiles.size > 1) {
-            // Có split APKs -> Sử dụng Session-based PackageInstaller
-            installSplitApks(context, allFiles) { success, msg ->
-                if (!success) {
-                    Toast.makeText(context, "Lỗi cài đặt Split APK: $msg", Toast.LENGTH_LONG).show()
-                }
+        // Luôn sử dụng PackageInstaller Session chuẩn cho CẢ APK đơn lẫn Split APKs
+        // để truyền dữ liệu trực tiếp qua Session Stream, tránh 100% lỗi SELinux của Android 11-14
+        installSplitApks(context, allFiles) { success, msg ->
+            if (!success) {
+                Toast.makeText(context, "Lỗi cài đặt: $msg", Toast.LENGTH_LONG).show()
             }
-        } else {
-            // File APK đơn -> Dùng PackageInstaller Intent
-            installSingleOrSession(context, baseApk)
         }
     }
 

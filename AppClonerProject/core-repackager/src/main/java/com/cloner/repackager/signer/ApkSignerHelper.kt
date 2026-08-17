@@ -16,21 +16,27 @@ import java.util.zip.ZipOutputStream
 object ApkSignerHelper {
 
     private var cachedKeyPair: KeyPair? = null
+    private var cachedCertDer: ByteArray? = null
 
     private fun getOrCreateKeyPair(): KeyPair {
         cachedKeyPair?.let { return it }
         val keyPairGen = KeyPairGenerator.getInstance("RSA")
-        val seed = "AppClonerStudio_Persistent_Signing_Key_Scheme_V1_V2".toByteArray(Charsets.UTF_8)
-        val sr = SecureRandom.getInstance("SHA1PRNG")
-        sr.setSeed(seed)
-        keyPairGen.initialize(2048, sr)
+        keyPairGen.initialize(2048)
         val kp = keyPairGen.generateKeyPair()
         cachedKeyPair = kp
         return kp
     }
 
+    private fun getOrCreateCertDer(keyPair: KeyPair): ByteArray {
+        cachedCertDer?.let { return it }
+        val cert = generateSelfSignedCertDer(keyPair)
+        cachedCertDer = cert
+        return cert
+    }
+
     fun signApk(inputApk: File, outputApk: File, progressListener: ((String, Int) -> Unit)? = null) {
         val tempV1Apk = File(inputApk.parentFile, "temp_v1_${System.currentTimeMillis()}.apk")
+        val tempAlignedApk = File(inputApk.parentFile, "temp_aligned_${System.currentTimeMillis()}.apk")
         try {
             val keyPair = getOrCreateKeyPair()
 
@@ -38,14 +44,21 @@ object ApkSignerHelper {
             // Bước 1: Ký số Scheme v1 (JAR Signature: MANIFEST.MF + CERT.SF + CERT.RSA)
             signV1(inputApk, tempV1Apk, keyPair)
 
-            progressListener?.invoke("Đang ký Scheme v2 (Streaming Block)...", 60)
-            // Bước 2: Ký số Scheme v2 bằng cơ chế STREAMING 0 MB RAM overhead
-            signV2Streaming(tempV1Apk, outputApk, keyPair)
+            progressListener?.invoke("Đang căn chỉnh 4-byte boundary (Zipalign)...", 45)
+            // Bước 2: Căn chỉnh resources.arsc và tệp STORED đạt chuẩn Android 11+ (Targeting R+)
+            ZipAligner.alignApk(tempV1Apk, tempAlignedApk)
+
+            progressListener?.invoke("Đang ký Scheme v2 (Streaming Block)...", 70)
+            // Bước 3: Ký số Scheme v2 bằng cơ chế STREAMING 0 MB RAM overhead
+            signV2Streaming(tempAlignedApk, outputApk, keyPair)
 
             progressListener?.invoke("Đã hoàn tất ký số APK!", 100)
         } finally {
             if (tempV1Apk.exists()) {
                 tempV1Apk.delete()
+            }
+            if (tempAlignedApk.exists()) {
+                tempAlignedApk.delete()
             }
         }
     }
@@ -131,7 +144,7 @@ object ApkSignerHelper {
         signature.update(sfBytes)
         val signedDataBytes = signature.sign()
 
-        val certBytes = generateSelfSignedCertDer(keyPair)
+        val certBytes = getOrCreateCertDer(keyPair)
         val pkcs7Block = buildPkcs7Der(certBytes, signedDataBytes)
 
         val rsaZipEntry = ZipEntry("META-INF/CERT.RSA")
@@ -185,7 +198,7 @@ object ApkSignerHelper {
             val topDigest = computeTopDigestStreaming(raf, sec1Len, cdOffset, sec2Len, eocdPos, sec3Len)
 
             // Xây dựng APK Signing Block v2
-            val certDer = generateSelfSignedCertDer(keyPair)
+            val certDer = getOrCreateCertDer(keyPair)
             val pubDer = keyPair.public.encoded
 
             val digestEntry = lpBytes(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(0x0103).array() + lpBytes(topDigest))
@@ -327,7 +340,9 @@ object ApkSignerHelper {
         val serial = derInt(1)
         val sigAlgo = derSeq(derOid(byteArrayOf(0x2A, 0x86.toByte(), 0x48, 0x86.toByte(), 0xF7.toByte(), 0x0D, 0x01, 0x01, 0x0B)) + derNull())
         val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner Studio Root CA"))))
-        val validity = derSeq(derUtcTime(Date(System.currentTimeMillis() - 86400000L)) + derUtcTime(Date(System.currentTimeMillis() + 86400000L * 365 * 25)))
+        val notBefore = Date(1609459200000L) // 2021-01-01 00:00:00 UTC
+        val notAfter = Date(2524608000000L)  // 2050-01-01 00:00:00 UTC
+        val validity = derSeq(derUtcTime(notBefore) + derUtcTime(notAfter))
         val subject = issuer
 
         val tbsCertificate = derSeq(
@@ -379,7 +394,7 @@ object ApkSignerHelper {
             signerInfos
         )
 
-        return derSeq(oidSignedData + derExplicit(0, signedData))
+        return derSeq(derOid(oidSignedData) + derExplicit(0, signedData))
     }
 
     private fun derLen(len: Int): ByteArray {

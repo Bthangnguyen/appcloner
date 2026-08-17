@@ -204,18 +204,8 @@ class CloneSettingsActivity : Activity() {
             null
         }
 
-        // Nạp các thư viện Native (.so) từ assets/native_libs để tiêm vào app clone
+        // Ma trận Hook runtime là thuần ART/Java Bytecode (PineHookManager) an toàn 100%
         val nativeLibsMap = mutableMapOf<String, ByteArray>()
-        try {
-            val abis = arrayOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-            for (abi in abis) {
-                val list = assets.list("native_libs/$abi") ?: continue
-                for (lib in list) {
-                    val bytes = assets.open("native_libs/$abi/$lib").use { it.readBytes() }
-                    nativeLibsMap["lib/$abi/$lib"] = bytes
-                }
-            }
-        } catch (ignored: Exception) {}
 
         // Trích xuất chữ ký gốc của app nguồn để phục vụ Signature Spoofing (Bypass kiểm tra chữ ký)
         val originalSigBase64 = try {
