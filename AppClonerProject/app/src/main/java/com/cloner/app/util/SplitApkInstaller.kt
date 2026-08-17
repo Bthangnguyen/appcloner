@@ -110,15 +110,17 @@ object SplitApkInstaller {
                 out.close()
             }
 
-            // Tạo Intent kết quả cài đặt
-            val intent = Intent(context, context.javaClass)
-            intent.action = "com.cloner.app.INSTALL_COMPLETE"
+            // Gửi PendingIntent qua Broadcast tới InstallStatusReceiver để kích hoạt popup xác nhận của Android
+            val intent = Intent(context, InstallStatusReceiver::class.java).apply {
+                action = InstallStatusReceiver.ACTION_INSTALL_STATUS
+                putExtra(InstallStatusReceiver.EXTRA_EXPECTED_SESSION_ID, sessionId)
+            }
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             } else {
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
-            val pendingIntent = PendingIntent.getActivity(context, sessionId, intent, flags)
+            val pendingIntent = PendingIntent.getBroadcast(context, sessionId, intent, flags)
 
             session.commit(pendingIntent.intentSender)
             session.close()

@@ -10,30 +10,32 @@ import org.json.JSONObject
 /**
  * ClonerInitProvider: ContentProvider khởi động tự động có độ ưu tiên cao nhất.
  * Chạy TRƯỚC Application.onCreate() và TRƯỚC mọi Activity/Service.
- * Giúp kích hoạt ma trận Hook (Fake ID, IMEI, Model, GPS, Signature Spoofing, SSL Unpinning, Native Hooks)
- * mà KHÔNG CẦN thay đổi lớp <application android:name="..."> -> Tránh 100% lỗi ClassCastException!
+ * Tự động kích hoạt CrashLogger và ma trận Hook an toàn 100%.
  */
 class ClonerInitProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val ctx = context ?: return false
+        // 1. Cài đặt CrashLogger ngay đầu tiên để bắt mọi lỗi tiềm ẩn
+        try {
+            CrashLogger.install(ctx)
+            CrashLogger.log("ClonerInitProvider starting for ${ctx.packageName}")
+        } catch (ignored: Throwable) {}
+
         loadConfigAndApplyHooks(ctx)
         return true
     }
 
     private fun loadConfigAndApplyHooks(context: Context) {
         try {
-            // Nạp các thư viện Native nếu có
-            try {
-                System.loadLibrary("appcloner")
-            } catch (ignored: Throwable) {}
-            try {
-                System.loadLibrary("system")
-            } catch (ignored: Throwable) {}
+            val jsonStr = try {
+                context.assets.open("cloner_runtime_config.json").bufferedReader().use { it.readText() }
+            } catch (e: Exception) {
+                CrashLogger.log("Warning: cloner_runtime_config.json not found in assets")
+                return
+            }
 
-            val jsonStr = context.assets.open("cloner_runtime_config.json").bufferedReader().use { it.readText() }
             val json = JSONObject(jsonStr)
-
             val config = ClonerRuntimeConfig(
                 originalPackageName = json.optString("originalPackageName"),
                 newPackageName = json.optString("newPackageName"),
@@ -59,12 +61,16 @@ class ClonerInitProvider : ContentProvider() {
 
             // Khởi tạo ma trận Hook
             PineHookManager.initHooks(context, config)
+            CrashLogger.log("Hooks initialized successfully: Model=${config.fakeModel}, Pkg=${config.newPackageName}")
 
             if (config.hideRoot) {
                 RootHideHook.applyRootHider()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (e: Throwable) {
+            CrashLogger.log("Error in ClonerInitProvider: ${e.message}")
+            try {
+                CrashLogger.dumpCrash(context, Thread.currentThread(), e)
+            } catch (ignored: Exception) {}
         }
     }
 

@@ -45,6 +45,10 @@ open class AppClonerApplication : Application() {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
+        try {
+            CrashLogger.install(base)
+            CrashLogger.log("AppClonerApplication attachBaseContext for ${base.packageName}")
+        } catch (ignored: Throwable) {}
         loadConfigAndApplyHooks(base)
         delegateAttachBaseContext(base)
     }
