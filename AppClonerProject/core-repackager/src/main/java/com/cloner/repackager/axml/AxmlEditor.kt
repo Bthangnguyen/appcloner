@@ -161,16 +161,20 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             modifiedStrings[pIdx] = newPackage
         }
 
-        // 2b. Đổi toàn bộ authorities của ContentProviders
+        // 2b. Đổi toàn bộ authorities của ContentProviders (hỗ trợ cả danh sách phân tách bằng dấu chấm phẩy ;)
         for (aIdx in authorityIndices) {
             val oldAuth = stringsList[aIdx]
-            modifiedStrings[aIdx] = if (oldAuth.contains(originalPackage)) {
-                oldAuth.replace(originalPackage, newPackage)
-            } else if (!oldAuth.endsWith(authoritySuffix)) {
-                "$oldAuth$authoritySuffix"
-            } else {
-                oldAuth
+            val parts = oldAuth.split(";")
+            val modifiedParts = parts.map { part ->
+                val trimmed = part.trim()
+                when {
+                    trimmed.isEmpty() -> trimmed
+                    trimmed.contains(originalPackage) -> trimmed.replace(originalPackage, newPackage)
+                    !trimmed.endsWith(authoritySuffix) -> "$trimmed$authoritySuffix"
+                    else -> trimmed
+                }
             }
+            modifiedStrings[aIdx] = modifiedParts.joinToString(";")
         }
 
         // 2c. Đổi custom permissions

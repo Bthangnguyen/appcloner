@@ -39,7 +39,6 @@ object PineHookManager {
 
         applyDeviceBuildHooks(config)
         applySystemPropertiesHooks(config)
-        applyPackageNameSpoofing(context, config)
         applySignatureVerificationBypass(context, config)
         if (config.unpinSsl) {
             applySslPinningBypass()
@@ -98,58 +97,7 @@ object PineHookManager {
         } catch (ignored: Exception) {}
     }
 
-    /**
-     * Can thiệp Package Name để vượt qua cơ chế Anti-Clone / Integrity Check (như Device Info HW)
-     */
-    private fun applyPackageNameSpoofing(context: Context, config: ClonerRuntimeConfig) {
-        val origPkg = config.originalPackageName
-        if (origPkg.isEmpty() || origPkg == config.newPackageName) return
 
-        try {
-            // 1. Spoof ActivityThread sCurrentPackageName & mBoundApplication.appInfo.packageName
-            val activityThreadClass = Class.forName("android.app.ActivityThread")
-            val currentActivityThreadMethod = activityThreadClass.getDeclaredMethod("currentActivityThread")
-            currentActivityThreadMethod.isAccessible = true
-            val activityThread = currentActivityThreadMethod.invoke(null)
-            if (activityThread != null) {
-                try {
-                    val sCurrentPackageNameField = activityThreadClass.getDeclaredField("sCurrentPackageName")
-                    sCurrentPackageNameField.isAccessible = true
-                    sCurrentPackageNameField.set(null, origPkg)
-                } catch (ignored: Throwable) {}
-
-                try {
-                    val mBoundApplicationField = activityThreadClass.getDeclaredField("mBoundApplication")
-                    mBoundApplicationField.isAccessible = true
-                    val boundApp = mBoundApplicationField.get(activityThread)
-                    if (boundApp != null) {
-                        val appInfoField = boundApp.javaClass.getDeclaredField("appInfo")
-                        appInfoField.isAccessible = true
-                        val appInfo = appInfoField.get(boundApp) as? android.content.pm.ApplicationInfo
-                        appInfo?.packageName = origPkg
-                    }
-                } catch (ignored: Throwable) {}
-            }
-        } catch (ignored: Throwable) {}
-
-        try {
-            // 2. Spoof ContextImpl.mPackageInfo.mPackageName
-            var currCtx: Context? = context
-            while (currCtx is android.content.ContextWrapper) {
-                currCtx = currCtx.baseContext
-            }
-            if (currCtx != null && currCtx.javaClass.name == "android.app.ContextImpl") {
-                val mPackageInfoField = currCtx.javaClass.getDeclaredField("mPackageInfo")
-                mPackageInfoField.isAccessible = true
-                val loadedApk = mPackageInfoField.get(currCtx)
-                if (loadedApk != null) {
-                    val mPackageNameField = loadedApk.javaClass.getDeclaredField("mPackageName")
-                    mPackageNameField.isAccessible = true
-                    mPackageNameField.set(loadedApk, origPkg)
-                }
-            }
-        } catch (ignored: Throwable) {}
-    }
 
     /**
      * 3. Signature Verification Bypass (Vượt qua kiểm tra chữ ký số gốc của TikTok/Facebook/Device Info HW)
