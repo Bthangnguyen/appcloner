@@ -57,6 +57,12 @@ object ApkSignerHelper {
             }
 
             val newEntry = ZipEntry(entry.name)
+            if (entry.method == ZipEntry.STORED) {
+                newEntry.method = ZipEntry.STORED
+                newEntry.size = entry.size
+                newEntry.compressedSize = entry.size
+                newEntry.crc = entry.crc
+            }
             zipOut.putNextEntry(newEntry)
             val inputStream = zipIn.getInputStream(entry)
             var bytesRead: Int

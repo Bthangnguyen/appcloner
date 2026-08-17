@@ -3,6 +3,7 @@ package com.cloner.repackager
 import com.cloner.repackager.axml.AxmlEditor
 import com.cloner.repackager.signer.ApkSignerHelper
 import java.io.*
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -36,12 +37,7 @@ data class CloneConfig(
 )
 
 /**
- * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK:
- * 1. Đọc APK nguồn
- * 2. Thay đổi nhị phân AndroidManifest.xml (Đổi package name, authorities)
- * 3. Thay thế biểu tượng Icon mới (Đổi màu Hue & thêm số thứ tự Clone)
- * 4. Nhúng tệp cấu hình giả lập cloner_runtime_config.json
- * 5. Ký số chứng chỉ kép APK Signature Scheme v1 + Scheme v2
+ * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -101,9 +97,15 @@ class ClonePipeline(private val config: CloneConfig) {
                         // Bỏ qua
                     }
 
-                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs)
+                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs) với việc bảo toàn STORED mode
                     else -> {
                         val newEntry = ZipEntry(entryName)
+                        if (entry.method == ZipEntry.STORED) {
+                            newEntry.method = ZipEntry.STORED
+                            newEntry.size = entry.size
+                            newEntry.compressedSize = entry.size
+                            newEntry.crc = entry.crc
+                        }
                         zipOut.putNextEntry(newEntry)
                         val inputStream = zipIn.getInputStream(entry)
                         var bytesRead: Int

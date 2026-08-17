@@ -6,7 +6,11 @@ import java.nio.ByteOrder
 
 /**
  * AxmlEditor: Trình phân tích và sửa đổi trực tiếp tệp AndroidManifest.xml nhị phân (Binary AXML).
- * Cho phép thay đổi package name, authorities của ContentProvider chuẩn xác 100%.
+ * - Thay đổi package name của manifest sang newPackage
+ * - Mở rộng các class relative (".MainActivity") thành absolute ("com.orig.MainActivity") để DEX tìm thấy
+ * - Giữ nguyên các class absolute gốc ("com.orig.MainActivity") để không bị ClassNotFoundException
+ * - Thay đổi ContentProvider authorities để tránh INSTALL_FAILED_CONFLICTING_PROVIDER
+ * - Thay đổi Custom Permission names để tránh INSTALL_FAILED_DUPLICATE_PERMISSION
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
@@ -67,16 +71,32 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             stringsList.add(str)
         }
 
-        // Thay thế các chuỗi cần đổi
+        // Biến đổi chuỗi thông minh:
         val modifiedStrings = stringsList.map { originalStr ->
             when {
+                // 1. Tên package gốc -> Tên package clone mới
                 originalStr == originalPackage -> newPackage
-                originalStr.startsWith(originalPackage) && !originalStr.contains("clone") -> {
+
+                // 2. Class relative (".MainActivity") -> Mở rộng thành "originalPackage.MainActivity" để OS tìm thấy class trong DEX gốc
+                originalStr.startsWith(".") -> "$originalPackage$originalStr"
+
+                // 3. Custom permissions & receiver permissions của app -> Thay bằng newPackage để tránh INSTALL_FAILED_DUPLICATE_PERMISSION
+                originalStr.startsWith(originalPackage) && (originalStr.contains("permission") || originalStr.contains("DYNAMIC_RECEIVER") || originalStr.contains("PROTECTED")) -> {
                     originalStr.replace(originalPackage, newPackage)
                 }
-                originalStr.contains("provider") && !originalStr.endsWith(authoritySuffix) -> {
-                    "$originalStr$authoritySuffix"
+
+                // 4. ContentProvider authorities -> Thêm hậu tố hoặc thay package để tránh INSTALL_FAILED_CONFLICTING_PROVIDER
+                originalStr.contains("provider") || originalStr.contains("fileprovider") -> {
+                    if (originalStr.startsWith(originalPackage)) {
+                        originalStr.replace(originalPackage, newPackage)
+                    } else if (!originalStr.endsWith(authoritySuffix)) {
+                        "$originalStr$authoritySuffix"
+                    } else {
+                        originalStr
+                    }
                 }
+
+                // 5. Mọi class name khác (kể cả "originalPackage.MainActivity", Application class, Services...) -> GIỮ NGUYÊN để tìm thấy trong DEX!
                 else -> originalStr
             }
         }
