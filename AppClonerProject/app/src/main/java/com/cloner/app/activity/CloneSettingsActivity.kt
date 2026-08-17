@@ -35,6 +35,9 @@ class CloneSettingsActivity : Activity() {
     private lateinit var etMac: EditText
     private lateinit var etLatitude: EditText
     private lateinit var etLongitude: EditText
+    private lateinit var tvGpsCity: TextView
+    private lateinit var btnGenGps: Button
+    private lateinit var btnRandomAll: Button
     private lateinit var cbHideRoot: CheckBox
     private lateinit var sbHue: SeekBar
     private lateinit var btnStartClone: Button
@@ -68,6 +71,9 @@ class CloneSettingsActivity : Activity() {
         etMac = findViewById(R.id.etMac)
         etLatitude = findViewById(R.id.etLatitude)
         etLongitude = findViewById(R.id.etLongitude)
+        tvGpsCity = findViewById(R.id.tvGpsCity)
+        btnGenGps = findViewById(R.id.btnGenGps)
+        btnRandomAll = findViewById(R.id.btnRandomAll)
         cbHideRoot = findViewById(R.id.cbHideRoot)
         sbHue = findViewById(R.id.sbHue)
         btnStartClone = findViewById(R.id.btnStartClone)
@@ -84,10 +90,22 @@ class CloneSettingsActivity : Activity() {
         etCloneName.setText("$name (Clone 1)")
 
         // Tự sinh bộ thông số giả lập ban đầu
+        randomizeAllIdentity()
+        ivAppIcon.setImageBitmap(baseIconBitmap)
+    }
+
+    private fun randomizeAllIdentity() {
         etAndroidId.setText(IdentityGenerator.generateAndroidId())
         etImei.setText(IdentityGenerator.generateImei())
         etMac.setText(IdentityGenerator.generateMacAddress())
-        ivAppIcon.setImageBitmap(baseIconBitmap)
+        randomizeGps()
+    }
+
+    private fun randomizeGps() {
+        val gps = IdentityGenerator.generateGps()
+        etLatitude.setText(String.format("%.6f", gps.lat))
+        etLongitude.setText(String.format("%.6f", gps.lng))
+        tvGpsCity.text = "📍 Vị trí ngẫu nhiên: ${gps.name}"
     }
 
     private fun setupListeners() {
@@ -101,6 +119,15 @@ class CloneSettingsActivity : Activity() {
 
         findViewById<Button>(R.id.btnGenMac)?.setOnClickListener {
             etMac.setText(IdentityGenerator.generateMacAddress())
+        }
+
+        btnGenGps.setOnClickListener {
+            randomizeGps()
+        }
+
+        btnRandomAll.setOnClickListener {
+            randomizeAllIdentity()
+            Toast.makeText(this, "Đã sinh mới toàn bộ thông số định danh thiết bị!", Toast.LENGTH_SHORT).show()
         }
 
         // Xử lý đổi màu icon xem trước

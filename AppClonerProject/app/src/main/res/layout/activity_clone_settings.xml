@@ -117,14 +117,32 @@
         </LinearLayout>
 
         <!-- Nhóm 2: Quyền riêng tư & Fake Thiết bị -->
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="2. GIẢ LẬP THÔNG SỐ &amp; BẢO MẬT"
-            android:textStyle="bold"
-            android:textColor="#1565C0"
-            android:textSize="14sp"
-            android:layout_marginBottom="6dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="2. GIẢ LẬP THÔNG SỐ &amp; BẢO MẬT"
+                android:textStyle="bold"
+                android:textColor="#1565C0"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnRandomAll"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="🎲 Sinh Tất Cả"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:background="#FF9800"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -134,6 +152,7 @@
             android:background="#FFFFFF"
             android:layout_marginBottom="24dp">
 
+            <!-- Android ID -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -161,6 +180,7 @@
                     android:layout_marginStart="6dp" />
             </LinearLayout>
 
+            <!-- IMEI -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -189,6 +209,7 @@
                     android:layout_marginStart="6dp" />
             </LinearLayout>
 
+            <!-- MAC Wi-Fi -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -217,11 +238,12 @@
                     android:layout_marginStart="6dp" />
             </LinearLayout>
 
-            <!-- Giả lập GPS -->
+            <!-- Giả lập GPS & Nút Sinh GPS -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
+                android:gravity="center_vertical"
                 android:layout_marginTop="8dp">
 
                 <EditText
@@ -229,7 +251,7 @@
                     android:layout_width="0dp"
                     android:layout_height="46dp"
                     android:layout_weight="1"
-                    android:hint="Vĩ độ (Lat, vd: 21.0285)"
+                    android:hint="Vĩ độ (Lat)"
                     android:textColor="#212121"
                     android:background="@android:drawable/editbox_background_normal"
                     android:textSize="13sp"
@@ -240,13 +262,32 @@
                     android:layout_width="0dp"
                     android:layout_height="46dp"
                     android:layout_weight="1"
-                    android:hint="Kinh độ (Lng, vd: 105.8542)"
+                    android:hint="Kinh độ (Lng)"
                     android:textColor="#212121"
                     android:background="@android:drawable/editbox_background_normal"
                     android:textSize="13sp"
                     android:inputType="numberDecimal|numberSigned"
                     android:layout_marginStart="6dp" />
+
+                <Button
+                    android:id="@+id/btnGenGps"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Sinh GPS"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvGpsCity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📍 Vị trí: Mặc định theo GPS thiết bị"
+                android:textColor="#455A64"
+                android:textSize="11sp"
+                android:layout_marginTop="4dp" />
 
             <CheckBox
                 android:id="@+id/cbHideRoot"
