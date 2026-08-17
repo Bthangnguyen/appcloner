@@ -18,6 +18,7 @@ import com.cloner.app.util.IconProcessor
 import com.cloner.repackager.CloneConfig
 import com.cloner.repackager.ClonePipeline
 import com.cloner.runtime.IdentityGenerator
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -188,11 +189,23 @@ class CloneSettingsActivity : Activity() {
         val newPkgName = "${appInfo.packageName}.clone$cloneNumber"
         val newName = etCloneName.text.toString()
 
+        // Xử lý nén Icon đã đổi màu / số thứ tự sang byte array PNG
+        var iconBytes: ByteArray? = null
+        baseIconBitmap?.let { bmp ->
+            val hue = sbHue.progress.toFloat()
+            val tinted = if (hue > 0f) IconProcessor.changeHue(bmp, hue) else bmp
+            val badged = IconProcessor.addCloneBadge(tinted, cloneNumber)
+            val bos = ByteArrayOutputStream()
+            badged.compress(Bitmap.CompressFormat.PNG, 100, bos)
+            iconBytes = bos.toByteArray()
+        }
+
         val config = CloneConfig(
             originalPackageName = appInfo.packageName,
             newPackageName = newPkgName,
             newAppName = newName,
             cloneNumber = cloneNumber,
+            modifiedIconBytes = iconBytes,
             fakeAndroidId = etAndroidId.text.toString().takeIf { it.isNotEmpty() },
             fakeImei = etImei.text.toString().takeIf { it.isNotEmpty() },
             fakeMacAddress = etMac.text.toString().takeIf { it.isNotEmpty() },

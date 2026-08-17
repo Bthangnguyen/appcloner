@@ -8,13 +8,14 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /**
- * Cấu hình tham số cho quá trình Clone:
+ * Cấu hình thiết lập cho một tác vụ nhân bản ứng dụng.
  */
 data class CloneConfig(
     val originalPackageName: String,
     val newPackageName: String,
     val newAppName: String,
     val cloneNumber: Int = 1,
+    val modifiedIconBytes: ByteArray? = null,
     // Thông số định danh cơ bản
     val fakeAndroidId: String? = null,
     val fakeImei: String? = null,
@@ -35,7 +36,12 @@ data class CloneConfig(
 )
 
 /**
- * ClonePipeline: Bộ điều phối quy trình clone APK hoàn chỉnh.
+ * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK:
+ * 1. Đọc APK nguồn
+ * 2. Thay đổi nhị phân AndroidManifest.xml (Đổi package name, authorities)
+ * 3. Thay thế biểu tượng Icon mới (Đổi màu Hue & thêm số thứ tự Clone)
+ * 4. Nhúng tệp cấu hình giả lập cloner_runtime_config.json
+ * 5. Ký số chứng chỉ kép APK Signature Scheme v1 + Scheme v2
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -43,16 +49,23 @@ class ClonePipeline(private val config: CloneConfig) {
         fun onProgress(step: String, percentage: Int)
     }
 
-    fun execute(inputApk: File, outputApk: File, listener: ProgressListener? = null) {
-        val tempUnsignedApk = File.createTempFile("clone_temp_", ".apk")
+    fun execute(sourceApk: File, outputApk: File, listener: ProgressListener? = null) {
+        if (!sourceApk.exists()) {
+            throw FileNotFoundException("Không tìm thấy tệp APK nguồn: ${sourceApk.absolutePath}")
+        }
+
+        outputApk.parentFile?.mkdirs()
+        val tempUnsignedApk = File(outputApk.parentFile, "temp_unsigned_${System.currentTimeMillis()}.apk")
 
         try {
-            listener?.onProgress("Đang đọc và phân tích file APK gốc...", 10)
-            val zipIn = ZipFile(inputApk)
+            listener?.onProgress("Đang phân tích cấu trúc APK nguồn...", 10)
+            val zipIn = ZipFile(sourceApk)
             val zipOut = ZipOutputStream(FileOutputStream(tempUnsignedApk))
 
             val entries = zipIn.entries()
             val buffer = ByteArray(8192)
+
+            listener?.onProgress("Đang tái cấu trúc AndroidManifest & thay đổi Icon...", 30)
 
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
@@ -61,23 +74,30 @@ class ClonePipeline(private val config: CloneConfig) {
                 when {
                     // Xử lý tệp AndroidManifest.xml nhị phân
                     entryName == "AndroidManifest.xml" -> {
-                        listener?.onProgress("Đang sửa đổi Package Name & Provider Authorities...", 30)
-                        val manifestBytes = zipIn.getInputStream(entry).readBytes()
-                        val axmlEditor = AxmlEditor(manifestBytes)
-                        val modifiedManifest = axmlEditor.modifyManifest(
+                        val manifestBytes = zipIn.getInputStream(entry).use { it.readBytes() }
+                        val editor = AxmlEditor(manifestBytes)
+                        val modifiedManifest = editor.modifyManifest(
                             originalPackage = config.originalPackageName,
                             newPackage = config.newPackageName,
-                            authoritySuffix = ".clone${config.cloneNumber}"
+                            newApplicationClass = "com.cloner.runtime.AppClonerApplication"
                         )
 
-                        val newEntry = ZipEntry("AndroidManifest.xml")
+                        val newEntry = ZipEntry(entryName)
                         zipOut.putNextEntry(newEntry)
                         zipOut.write(modifiedManifest)
                         zipOut.closeEntry()
                     }
 
+                    // Thay thế biểu tượng Icon khi có yêu cầu đổi màu
+                    config.modifiedIconBytes != null && (entryName.contains("ic_launcher") || entryName.contains("icon")) && entryName.endsWith(".png") -> {
+                        val newEntry = ZipEntry(entryName)
+                        zipOut.putNextEntry(newEntry)
+                        zipOut.write(config.modifiedIconBytes)
+                        zipOut.closeEntry()
+                    }
+
                     // Bỏ qua chữ ký cũ
-                    entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF")) -> {
+                    entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF") || entryName.endsWith(".DSA")) -> {
                         // Bỏ qua
                     }
 
@@ -103,8 +123,8 @@ class ClonePipeline(private val config: CloneConfig) {
             zipIn.close()
             zipOut.close()
 
-            // Ký số APK đầu ra
-            listener?.onProgress("Đang tạo chứng chỉ số và ký file APK...", 85)
+            // Ký số kép v1 + v2 cho APK đầu ra
+            listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 80)
             ApkSignerHelper.signApk(tempUnsignedApk, outputApk)
 
             listener?.onProgress("Hoàn thành quá trình Clone APK!", 100)
