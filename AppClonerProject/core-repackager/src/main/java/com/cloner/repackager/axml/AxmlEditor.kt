@@ -52,6 +52,21 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         for (i in 0 until stringCount) {
             stringOffsets[i] = buffer.int
         }
+        val styleOffsets = IntArray(styleCount)
+        for (i in 0 until styleCount) {
+            styleOffsets[i] = buffer.int
+        }
+
+        val styleData = if (styleCount > 0 && stylesStart > 0) {
+            val absoluteStylesStart = 8 + stylesStart
+            val absolutePoolEnd = 8 + stringPoolSize
+            if (absoluteStylesStart !in 8..absolutePoolEnd) {
+                throw IllegalArgumentException("String pool có stylesStart không hợp lệ")
+            }
+            manifestBytes.copyOfRange(absoluteStylesStart, absolutePoolEnd)
+        } else {
+            ByteArray(0)
+        }
 
         val poolDataStart = 8 + stringsStart
         val stringsList = ArrayList<String>(stringCount)
@@ -187,7 +202,14 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             }
         }
 
-        return rebuildAxml(stringPoolSize, modifiedStrings, isUtf8, styleCount)
+        return rebuildAxml(
+            originalStringPoolSize = stringPoolSize,
+            newStrings = modifiedStrings,
+            isUtf8 = isUtf8,
+            originalFlags = flags,
+            styleOffsets = styleOffsets,
+            styleData = styleData
+        )
     }
 
     private fun readUtf8String(buffer: ByteBuffer): String {
@@ -222,7 +244,9 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         originalStringPoolSize: Int,
         newStrings: List<String>,
         isUtf8: Boolean,
-        styleCount: Int
+        originalFlags: Int,
+        styleOffsets: IntArray,
+        styleData: ByteArray
     ): ByteArray {
         val out = ByteArrayOutputStream()
         val strOffsets = mutableListOf<Int>()
@@ -242,19 +266,19 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         }
 
         val stringCount = newStrings.size
+        val styleCount = styleOffsets.size
         val newStringsStart = 28 + (stringCount * 4) + (styleCount * 4)
-        val newStringPoolTotalSize = newStringsStart + strDataOut.size()
-
-        val cleanFlags = if (isUtf8) (1 shl 8) else 0
+        val newStylesStart = if (styleCount > 0) newStringsStart + strDataOut.size() else 0
+        val newStringPoolTotalSize = newStringsStart + strDataOut.size() + styleData.size
 
         val spHeader = ByteBuffer.allocate(28).order(ByteOrder.LITTLE_ENDIAN)
         spHeader.putInt(CHUNK_STRING_POOL)
         spHeader.putInt(newStringPoolTotalSize)
         spHeader.putInt(stringCount)
         spHeader.putInt(styleCount)
-        spHeader.putInt(cleanFlags)
+        spHeader.putInt(originalFlags)
         spHeader.putInt(newStringsStart)
-        spHeader.putInt(0)
+        spHeader.putInt(newStylesStart)
 
         val xmlBodyStart = 8 + originalStringPoolSize
         val xmlBody = manifestBytes.copyOfRange(xmlBodyStart, manifestBytes.size)
@@ -270,7 +294,12 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             val offBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(offset).array()
             out.write(offBuf)
         }
+        for (offset in styleOffsets) {
+            val offBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(offset).array()
+            out.write(offBuf)
+        }
         out.write(strDataOut.toByteArray())
+        out.write(styleData)
         out.write(xmlBody)
 
         return out.toByteArray()

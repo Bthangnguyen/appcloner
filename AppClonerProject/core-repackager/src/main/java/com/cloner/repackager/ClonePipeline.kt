@@ -53,6 +53,19 @@ class ClonePipeline(private val config: CloneConfig) {
         }
 
         outputApk.parentFile?.mkdirs()
+        val estimatedMergedSize = sourceApks.sumOf { if (it.exists()) it.length() else 0L }
+        val requiredWorkingSpace = if (estimatedMergedSize > Long.MAX_VALUE / 3L) {
+            Long.MAX_VALUE
+        } else {
+            estimatedMergedSize * 3L + (64L * 1024L * 1024L)
+        }
+        val usableSpace = outputApk.parentFile?.usableSpace ?: 0L
+        if (usableSpace > 0L && usableSpace < requiredWorkingSpace) {
+            throw IOException(
+                "Không đủ dung lượng trống để clone. Cần khoảng ${requiredWorkingSpace / (1024 * 1024)} MiB, " +
+                        "hiện còn ${usableSpace / (1024 * 1024)} MiB"
+            )
+        }
         val tempUnsignedApk = File(outputApk.parentFile, "temp_unsigned_${System.currentTimeMillis()}.apk")
 
         try {
@@ -101,6 +114,11 @@ class ClonePipeline(private val config: CloneConfig) {
                 val entry = baseEntries.nextElement()
                 val entryName = entry.name
                 addedEntries.add(entryName)
+
+                // Nếu đầu vào đã từng được clone, cấu hình mới sẽ được ghi lại ở cuối pipeline.
+                if (entryName == "assets/cloner_runtime_config.json") {
+                    continue
+                }
 
                 val isIconImage = config.modifiedIconBytes != null &&
                         (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
@@ -228,7 +246,9 @@ class ClonePipeline(private val config: CloneConfig) {
 
             // Bước 5: Ký số kép v1 + v2
             listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 85)
-            ApkSignerHelper.signApk(tempUnsignedApk, outputApk)
+            ApkSignerHelper.signApk(tempUnsignedApk, outputApk) { step, signPercentage ->
+                listener?.onProgress(step, 85 + (signPercentage * 14 / 100))
+            }
 
             listener?.onProgress("Hoàn thành quá trình Clone APK!", 100)
 

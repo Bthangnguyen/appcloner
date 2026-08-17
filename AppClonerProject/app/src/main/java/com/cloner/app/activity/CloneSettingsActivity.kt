@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import android.widget.*
 import com.cloner.app.R
 import com.cloner.app.util.AppClonerFileProvider
@@ -228,6 +229,7 @@ class CloneSettingsActivity : Activity() {
         }
 
         Thread {
+            var diagnosticLog: File? = null
             try {
                 // Thu thập tất cả các tệp APK nguồn (Base APK + Split APKs)
                 val srcApks = mutableListOf<File>()
@@ -240,11 +242,20 @@ class CloneSettingsActivity : Activity() {
                 }
 
                 val outDir = getStorageCloneDir()
+                diagnosticLog = File(outDir, "latest_clone.log")
+                diagnosticLog.writeText("")
                 val outApk = File(outDir, "${config.newPackageName}.apk")
+                appendCloneLog(diagnosticLog, "Bắt đầu clone ${config.originalPackageName} -> ${config.newPackageName}")
+                appendCloneLog(diagnosticLog, "Thiết bị=${Build.MANUFACTURER} ${Build.MODEL}, SDK=${Build.VERSION.SDK_INT}")
+                appendCloneLog(diagnosticLog, "Heap tối đa=${Runtime.getRuntime().maxMemory() / (1024 * 1024)} MiB")
+                srcApks.forEachIndexed { index, file ->
+                    appendCloneLog(diagnosticLog, "APK[$index]=${file.absolutePath}, size=${file.length()}")
+                }
 
                 val pipeline = ClonePipeline(config)
                 pipeline.execute(srcApks, outApk, object : ClonePipeline.ProgressListener {
                     override fun onProgress(step: String, percentage: Int) {
+                        appendCloneLog(diagnosticLog, "$percentage% - $step (${heapSummary()})")
                         runOnUiThread {
                             progressDialog.setMessage(step)
                             progressDialog.progress = percentage
@@ -257,17 +268,46 @@ class CloneSettingsActivity : Activity() {
                     showCloneSuccessDialog(outApk, config.newAppName)
                 }
 
-            } catch (e: Exception) {
+            } catch (oom: OutOfMemoryError) {
+                val message = "Không đủ RAM khi xử lý APK lớn. ${heapSummary()}"
+                appendCloneLog(diagnosticLog, "$message\n${Log.getStackTraceString(oom)}")
                 runOnUiThread {
                     progressDialog.dismiss()
-                    AlertDialog.Builder(this@CloneSettingsActivity)
-                        .setTitle("Lỗi nhân bản")
-                        .setMessage("Chi tiết lỗi: ${e.localizedMessage}")
-                        .setPositiveButton("Đóng", null)
-                        .show()
+                    showCloneError(message, diagnosticLog)
+                }
+            } catch (e: Exception) {
+                appendCloneLog(diagnosticLog, "Clone thất bại: ${e.message}\n${Log.getStackTraceString(e)}")
+                runOnUiThread {
+                    progressDialog.dismiss()
+                    showCloneError(e.localizedMessage ?: e.javaClass.simpleName, diagnosticLog)
                 }
             }
         }.start()
+    }
+
+    private fun appendCloneLog(file: File?, message: String) {
+        Log.i("AppCloner", message)
+        if (file == null) return
+        try {
+            file.appendText("${System.currentTimeMillis()} $message\n")
+        } catch (ignored: Exception) {
+        }
+    }
+
+    private fun heapSummary(): String {
+        val runtime = Runtime.getRuntime()
+        val usedMiB = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
+        val maxMiB = runtime.maxMemory() / (1024 * 1024)
+        return "heap=${usedMiB}/${maxMiB}MiB"
+    }
+
+    private fun showCloneError(detail: String, diagnosticLog: File?) {
+        val logLocation = diagnosticLog?.absolutePath ?: "chưa tạo được file log"
+        AlertDialog.Builder(this)
+            .setTitle("Lỗi nhân bản")
+            .setMessage("Chi tiết: $detail\n\nLog chẩn đoán: $logLocation")
+            .setPositiveButton("Đóng", null)
+            .show()
     }
 
     private fun showCloneSuccessDialog(apkFile: File, appName: String) {
