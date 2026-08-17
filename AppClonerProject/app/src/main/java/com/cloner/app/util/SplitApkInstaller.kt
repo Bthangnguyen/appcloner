@@ -98,7 +98,7 @@ object SplitApkInstaller {
 
             for ((index, file) in apkFiles.withIndex()) {
                 if (!file.exists()) continue
-                val entryName = if (index == 0) "base.apk" else "split_${index}_${file.name}"
+                val entryName = if (index == 0) "base.apk" else "split_${index}.apk"
                 val out = session.openWrite(entryName, 0, file.length())
                 FileInputStream(file).use { input ->
                     var bytesRead: Int
