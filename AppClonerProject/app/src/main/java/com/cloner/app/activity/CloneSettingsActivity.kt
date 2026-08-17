@@ -176,7 +176,6 @@ class CloneSettingsActivity : Activity() {
     }
 
     private fun getStorageCloneDir(): File {
-        // Thư mục lưu trữ an toàn 100% không bao giờ bị lỗi quyền EACCES trên mọi Android 11, 12, 13, 14
         val dir = getExternalFilesDir("clones") ?: File(filesDir, "clones")
         if (!dir.exists()) {
             dir.mkdirs()
@@ -221,7 +220,7 @@ class CloneSettingsActivity : Activity() {
 
         val progressDialog = ProgressDialog(this).apply {
             setTitle("Đang nhân bản ứng dụng")
-            setMessage("Đang chuẩn bị...")
+            setMessage("Đang thu thập các gói Split APKs...")
             setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
             max = 100
             setCancelable(false)
@@ -230,12 +229,21 @@ class CloneSettingsActivity : Activity() {
 
         Thread {
             try {
-                val srcApk = File(appInfo.sourceDir)
+                // Thu thập tất cả các tệp APK nguồn (Base APK + Split APKs)
+                val srcApks = mutableListOf<File>()
+                srcApks.add(File(appInfo.sourceDir))
+                appInfo.splitSourceDirs?.forEach { splitPath ->
+                    val splitFile = File(splitPath)
+                    if (splitFile.exists()) {
+                        srcApks.add(splitFile)
+                    }
+                }
+
                 val outDir = getStorageCloneDir()
                 val outApk = File(outDir, "${config.newPackageName}.apk")
 
                 val pipeline = ClonePipeline(config)
-                pipeline.execute(srcApk, outApk, object : ClonePipeline.ProgressListener {
+                pipeline.execute(srcApks, outApk, object : ClonePipeline.ProgressListener {
                     override fun onProgress(step: String, percentage: Int) {
                         runOnUiThread {
                             progressDialog.setMessage(step)
@@ -265,7 +273,7 @@ class CloneSettingsActivity : Activity() {
     private fun showCloneSuccessDialog(apkFile: File, appName: String) {
         AlertDialog.Builder(this)
             .setTitle(" Nhân bản Thành công!")
-            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\nTệp APK đã sẵn sàng để cài đặt.\n\nBạn có muốn cài đặt ứng dụng vừa nhân bản ngay bây giờ không?")
+            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\nTệp APK hoàn chỉnh (~${String.format("%.1f", apkFile.length() / (1024.0 * 1024.0))} MB) đã sẵn sàng.\n\nBạn có muốn cài đặt ngay bây giờ không?")
             .setPositiveButton(" CÀI ĐẶT NGAY") { _, _ ->
                 installApk(apkFile)
             }

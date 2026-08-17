@@ -3,7 +3,6 @@ package com.cloner.repackager
 import com.cloner.repackager.axml.AxmlEditor
 import com.cloner.repackager.signer.ApkSignerHelper
 import java.io.*
-import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -37,7 +36,8 @@ data class CloneConfig(
 )
 
 /**
- * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK
+ * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK.
+ * Hỗ trợ tự động hợp nhất các tệp Split APKs (App Bundle / Fused APK) thành một tệp APK độc lập hoàn chỉnh.
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -45,32 +45,35 @@ class ClonePipeline(private val config: CloneConfig) {
         fun onProgress(step: String, percentage: Int)
     }
 
-    fun execute(sourceApk: File, outputApk: File, listener: ProgressListener? = null) {
-        if (!sourceApk.exists()) {
-            throw FileNotFoundException("Không tìm thấy tệp APK nguồn: ${sourceApk.absolutePath}")
+    fun execute(sourceApks: List<File>, outputApk: File, listener: ProgressListener? = null) {
+        if (sourceApks.isEmpty() || !sourceApks[0].exists()) {
+            throw FileNotFoundException("Không tìm thấy tệp APK nguồn!")
         }
 
         outputApk.parentFile?.mkdirs()
         val tempUnsignedApk = File(outputApk.parentFile, "temp_unsigned_${System.currentTimeMillis()}.apk")
 
         try {
-            listener?.onProgress("Đang phân tích cấu trúc APK nguồn...", 10)
-            val zipIn = ZipFile(sourceApk)
+            listener?.onProgress("Đang phân tích cấu trúc APK & hợp nhất Split APKs...", 10)
             val zipOut = ZipOutputStream(FileOutputStream(tempUnsignedApk))
-
-            val entries = zipIn.entries()
             val buffer = ByteArray(8192)
+            val addedEntries = HashSet<String>()
+
+            val baseApk = sourceApks[0]
+            val baseZip = ZipFile(baseApk)
+            val baseEntries = baseZip.entries()
 
             listener?.onProgress("Đang tái cấu trúc AndroidManifest & thay đổi Icon...", 30)
 
-            while (entries.hasMoreElements()) {
-                val entry = entries.nextElement()
+            // 1. Sao chép và xử lý các tệp từ Base APK
+            while (baseEntries.hasMoreElements()) {
+                val entry = baseEntries.nextElement()
                 val entryName = entry.name
+                addedEntries.add(entryName)
 
                 when {
-                    // Xử lý tệp AndroidManifest.xml nhị phân
                     entryName == "AndroidManifest.xml" -> {
-                        val manifestBytes = zipIn.getInputStream(entry).use { it.readBytes() }
+                        val manifestBytes = baseZip.getInputStream(entry).use { it.readBytes() }
                         val editor = AxmlEditor(manifestBytes)
                         val modifiedManifest = editor.modifyManifest(
                             originalPackage = config.originalPackageName,
@@ -84,7 +87,6 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // Thay thế biểu tượng Icon khi có yêu cầu đổi màu
                     config.modifiedIconBytes != null && (entryName.contains("ic_launcher") || entryName.contains("icon")) && entryName.endsWith(".png") -> {
                         val newEntry = ZipEntry(entryName)
                         zipOut.putNextEntry(newEntry)
@@ -92,12 +94,10 @@ class ClonePipeline(private val config: CloneConfig) {
                         zipOut.closeEntry()
                     }
 
-                    // Bỏ qua chữ ký cũ
                     entryName.startsWith("META-INF/") && (entryName.endsWith(".SF") || entryName.endsWith(".RSA") || entryName.endsWith(".MF") || entryName.endsWith(".DSA")) -> {
-                        // Bỏ qua
+                        // Bỏ qua chữ ký cũ
                     }
 
-                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs) với việc bảo toàn STORED mode
                     else -> {
                         val newEntry = ZipEntry(entryName)
                         if (entry.method == ZipEntry.STORED) {
@@ -107,7 +107,7 @@ class ClonePipeline(private val config: CloneConfig) {
                             newEntry.crc = entry.crc
                         }
                         zipOut.putNextEntry(newEntry)
-                        val inputStream = zipIn.getInputStream(entry)
+                        val inputStream = baseZip.getInputStream(entry)
                         var bytesRead: Int
                         while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                             zipOut.write(buffer, 0, bytesRead)
@@ -117,16 +117,56 @@ class ClonePipeline(private val config: CloneConfig) {
                     }
                 }
             }
+            baseZip.close()
 
-            // Ghi file cấu hình runtime vào assets/ của APK clone
-            listener?.onProgress("Đang nhúng cấu hình giả lập danh tính & proxy...", 60)
+            // 2. Hợp nhất các tệp từ Split APKs (native libraries .so, assets, splits)
+            if (sourceApks.size > 1) {
+                listener?.onProgress("Đang hợp nhất thư viện native và tài nguyên splits...", 50)
+                for (i in 1 until sourceApks.size) {
+                    val splitFile = sourceApks[i]
+                    if (!splitFile.exists()) continue
+
+                    val splitZip = ZipFile(splitFile)
+                    val splitEntries = splitZip.entries()
+
+                    while (splitEntries.hasMoreElements()) {
+                        val entry = splitEntries.nextElement()
+                        val entryName = entry.name
+
+                        // Bỏ qua manifest và chữ ký của split APK
+                        if (entryName == "AndroidManifest.xml" || entryName.startsWith("META-INF/") || addedEntries.contains(entryName)) {
+                            continue
+                        }
+
+                        addedEntries.add(entryName)
+                        val newEntry = ZipEntry(entryName)
+                        if (entry.method == ZipEntry.STORED) {
+                            newEntry.method = ZipEntry.STORED
+                            newEntry.size = entry.size
+                            newEntry.compressedSize = entry.size
+                            newEntry.crc = entry.crc
+                        }
+                        zipOut.putNextEntry(newEntry)
+                        val inputStream = splitZip.getInputStream(entry)
+                        var bytesRead: Int
+                        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                            zipOut.write(buffer, 0, bytesRead)
+                        }
+                        zipOut.closeEntry()
+                        inputStream.close()
+                    }
+                    splitZip.close()
+                }
+            }
+
+            // 3. Ghi file cấu hình runtime vào assets/
+            listener?.onProgress("Đang nhúng cấu hình giả lập danh tính & proxy...", 70)
             injectRuntimeConfig(zipOut)
 
-            zipIn.close()
             zipOut.close()
 
-            // Ký số kép v1 + v2 cho APK đầu ra
-            listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 80)
+            // 4. Ký số kép v1 + v2 cho APK đầu ra
+            listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 85)
             ApkSignerHelper.signApk(tempUnsignedApk, outputApk)
 
             listener?.onProgress("Hoàn thành quá trình Clone APK!", 100)
