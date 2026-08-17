@@ -1,0 +1,20 @@
+# Build Outputs
+build/
+build_out/
+*.apk
+*.idsig
+*.zip
+*.log
+
+# Large External Tools & Decompiled Caches
+tools/
+decompiled_src/
+.system_generated/
+
+# Gradle & IDE
+.gradle/
+.idea/
+*.iml
+local.properties
+.DS_Store
+Thumbs.db

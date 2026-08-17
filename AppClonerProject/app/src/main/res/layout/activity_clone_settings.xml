@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#ECEFF1"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Header xem trước App & Icon -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="20dp"
+            android:background="#FFFFFF"
+            android:layout_marginBottom="16dp">
+
+            <ImageView
+                android:id="@+id/ivAppIcon"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:id="@+id/tvAppName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tên Ứng Dụng"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#212121" />
+
+            <TextView
+                android:id="@+id/tvPackageName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="com.example.app"
+                android:textSize="13sp"
+                android:textColor="#757575"
+                android:layout_marginTop="2dp" />
+
+            <!-- Thanh kéo đổi màu Icon -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Đổi màu sắc biểu tượng (Icon Hue):"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#37474F"
+                android:layout_marginTop="16dp" />
+
+            <SeekBar
+                android:id="@+id/sbHue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="360"
+                android:progress="0"
+                android:layout_marginTop="8dp" />
+        </LinearLayout>
+
+        <!-- Nhóm 1: Thiết lập Tên & Số Clone -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1. TÙY CHỌN CƠ BẢN"
+            android:textStyle="bold"
+            android:textColor="#1565C0"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#FFFFFF"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Số thứ tự Clone:"
+                android:textSize="13sp"
+                android:textColor="#424242" />
+
+            <EditText
+                android:id="@+id/etCloneNumber"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:inputType="number"
+                android:text="1"
+                android:textColor="#212121"
+                android:background="@android:drawable/editbox_background_normal"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tên mới hiển thị trên màn hình:"
+                android:textSize="13sp"
+                android:textColor="#424242"
+                android:layout_marginTop="8dp" />
+
+            <EditText
+                android:id="@+id/etCloneName"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:textColor="#212121"
+                android:background="@android:drawable/editbox_background_normal"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- Nhóm 2: Quyền riêng tư & Fake Thiết bị -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2. GIẢ LẬP THÔNG SỐ &amp; BẢO MẬT"
+            android:textStyle="bold"
+            android:textColor="#1565C0"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#FFFFFF"
+            android:layout_marginBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <EditText
+                    android:id="@+id/etAndroidId"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Fake Android ID (16 hex)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnGenAndroidId"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Sinh ID"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
+
+                <EditText
+                    android:id="@+id/etImei"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Fake IMEI (15 số Luhn)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnGenImei"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Sinh IMEI"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
+
+                <EditText
+                    android:id="@+id/etMac"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Fake MAC (00:1A:...)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnGenMac"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Sinh MAC"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <!-- Giả lập GPS -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <EditText
+                    android:id="@+id/etLatitude"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Vĩ độ (Lat, vd: 21.0285)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp"
+                    android:inputType="numberDecimal|numberSigned" />
+
+                <EditText
+                    android:id="@+id/etLongitude"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:hint="Kinh độ (Lng, vd: 105.8542)"
+                    android:textColor="#212121"
+                    android:background="@android:drawable/editbox_background_normal"
+                    android:textSize="13sp"
+                    android:inputType="numberDecimal|numberSigned"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/cbHideRoot"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bật che giấu trạng thái Root (Hide Root)"
+                android:checked="true"
+                android:textColor="#212121"
+                android:textSize="13sp"
+                android:layout_marginTop="12dp" />
+        </LinearLayout>
+
+        <!-- Nút Bắt đầu Clone -->
+        <Button
+            android:id="@+id/btnStartClone"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="BẮT ĐẦU NHÂN BẢN (START CLONE)"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:background="#2E7D32"
+            android:layout_marginBottom="32dp" />
+    </LinearLayout>
+</ScrollView>
