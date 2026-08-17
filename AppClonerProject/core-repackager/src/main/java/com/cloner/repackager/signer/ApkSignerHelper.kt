@@ -10,8 +10,8 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /**
- * ApkSignerHelper: Hỗ trợ tự động ký kép (APK Signature Scheme v1 + APK Signature Scheme v2)
- * với Cặp khóa RSA cố định (Persistent KeyPair), đảm bảo tính nhất quán của chữ ký số khi cập nhật/cài đè app clone.
+ * ApkSignerHelper: Hỗ trợ tự động ký kép (APK Signature Scheme v1 + Scheme v2)
+ * với cơ chế STREAMING TOÀN PHẦN (Zero-OOM), đảm bảo xử lý mượt mà các ứng dụng dung lượng lớn (TikTok, Facebook, PUBG > 500MB).
  */
 object ApkSignerHelper {
 
@@ -29,25 +29,20 @@ object ApkSignerHelper {
         return kp
     }
 
-    fun signApk(
-        inputApk: File,
-        outputApk: File,
-        progress: ((step: String, percentage: Int) -> Unit)? = null
-    ) {
+    fun signApk(inputApk: File, outputApk: File, progressListener: ((String, Int) -> Unit)? = null) {
         val tempV1Apk = File(inputApk.parentFile, "temp_v1_${System.currentTimeMillis()}.apk")
         try {
             val keyPair = getOrCreateKeyPair()
-            val certificateDer = generateSelfSignedCertDer(keyPair)
 
+            progressListener?.invoke("Đang ký Scheme v1 (JAR Signature)...", 20)
             // Bước 1: Ký số Scheme v1 (JAR Signature: MANIFEST.MF + CERT.SF + CERT.RSA)
-            progress?.invoke("Đang tạo chữ ký APK v1...", 0)
-            signV1(inputApk, tempV1Apk, keyPair, certificateDer)
+            signV1(inputApk, tempV1Apk, keyPair)
 
-            // Bước 2: Ký số Scheme v2 (APK Signing Block v2)
-            progress?.invoke("Đang tạo chữ ký APK v2 theo luồng dữ liệu...", 45)
-            signV2(tempV1Apk, outputApk, keyPair, certificateDer)
-            progress?.invoke("Đã hoàn tất chữ ký APK v1/v2", 100)
+            progressListener?.invoke("Đang ký Scheme v2 (Streaming Block)...", 60)
+            // Bước 2: Ký số Scheme v2 bằng cơ chế STREAMING 0 MB RAM overhead
+            signV2Streaming(tempV1Apk, outputApk, keyPair)
 
+            progressListener?.invoke("Đã hoàn tất ký số APK!", 100)
         } finally {
             if (tempV1Apk.exists()) {
                 tempV1Apk.delete()
@@ -59,13 +54,12 @@ object ApkSignerHelper {
     // 1. APK SIGNATURE SCHEME V1 (JAR SIGNING)
     // =========================================================================
 
-    private fun signV1(inputApk: File, outputApk: File, keyPair: KeyPair, certificateDer: ByteArray) {
+    private fun signV1(inputApk: File, outputApk: File, keyPair: KeyPair) {
         val zipIn = ZipFile(inputApk)
-        val countingOutput = CountingOutputStream(BufferedOutputStream(FileOutputStream(outputApk)))
-        val zipOut = ZipOutputStream(countingOutput)
+        val zipOut = ZipOutputStream(BufferedOutputStream(FileOutputStream(outputApk), 65536))
 
         val entries = zipIn.entries()
-        val buffer = ByteArray(8192)
+        val buffer = ByteArray(65536)
         val md = MessageDigest.getInstance("SHA-256")
         val manifestEntries = LinkedHashMap<String, String>()
 
@@ -78,13 +72,11 @@ object ApkSignerHelper {
             }
 
             val newEntry = ZipEntry(entry.name)
-            newEntry.extra = entry.extra
             if (entry.method == ZipEntry.STORED) {
                 newEntry.method = ZipEntry.STORED
                 newEntry.size = entry.size
                 newEntry.compressedSize = entry.size
                 newEntry.crc = entry.crc
-                alignStoredEntry(newEntry, countingOutput.bytesWritten)
             }
             zipOut.putNextEntry(newEntry)
             val inputStream = zipIn.getInputStream(entry)
@@ -139,7 +131,8 @@ object ApkSignerHelper {
         signature.update(sfBytes)
         val signedDataBytes = signature.sign()
 
-        val pkcs7Block = buildPkcs7Der(certificateDer, signedDataBytes)
+        val certBytes = generateSelfSignedCertDer(keyPair)
+        val pkcs7Block = buildPkcs7Der(certBytes, signedDataBytes)
 
         val rsaZipEntry = ZipEntry("META-INF/CERT.RSA")
         zipOut.putNextEntry(rsaZipEntry)
@@ -150,63 +143,54 @@ object ApkSignerHelper {
         zipOut.close()
     }
 
-    /**
-     * Căn data offset của entry STORED bằng ZIP extra field. Native libraries được
-     * căn 16 KiB (đồng thời thỏa 4 KiB trên các máy cũ); các entry STORED khác căn 4 byte.
-     */
-    private fun alignStoredEntry(entry: ZipEntry, localHeaderOffset: Long) {
-        val alignment = if (entry.name.startsWith("lib/") && entry.name.endsWith(".so")) 16384 else 4
-        val nameLength = entry.name.toByteArray(Charsets.UTF_8).size
-        val existingExtra = entry.extra ?: ByteArray(0)
-        val dataOffsetWithoutPadding = localHeaderOffset + 30L + nameLength + existingExtra.size
-        var paddingSize = ((alignment - (dataOffsetWithoutPadding % alignment)) % alignment).toInt()
-        if (paddingSize == 0) return
-
-        // Một ZIP extra field cần header 4 byte. Nếu khoảng cần bù nhỏ hơn header,
-        // dùng thêm một chu kỳ alignment để vẫn tạo được field hợp lệ.
-        if (paddingSize < 4) paddingSize += alignment
-        val padding = ByteArray(paddingSize)
-        padding[0] = 0x35
-        padding[1] = 0xD9.toByte()
-        val payloadSize = paddingSize - 4
-        padding[2] = (payloadSize and 0xFF).toByte()
-        padding[3] = ((payloadSize ushr 8) and 0xFF).toByte()
-        entry.extra = existingExtra + padding
-    }
-
-    private class CountingOutputStream(output: OutputStream) : FilterOutputStream(output) {
-        var bytesWritten: Long = 0L
-            private set
-
-        override fun write(value: Int) {
-            out.write(value)
-            bytesWritten++
-        }
-
-        override fun write(buffer: ByteArray, offset: Int, length: Int) {
-            out.write(buffer, offset, length)
-            bytesWritten += length
-        }
-    }
-
     // =========================================================================
-    // 2. APK SIGNATURE SCHEME V2 (APK SIGNING BLOCK)
+    // 2. APK SIGNATURE SCHEME V2 STREAMING (ZERO-OOM)
     // =========================================================================
 
-    private fun signV2(inputApk: File, outputApk: File, keyPair: KeyPair, certificateDer: ByteArray) {
-        RandomAccessFile(inputApk, "r").use { apk ->
-            val sections = findZipSections(apk)
+    private fun signV2Streaming(inputApk: File, outputApk: File, keyPair: KeyPair) {
+        val fileLength = inputApk.length()
+        val raf = RandomAccessFile(inputApk, "r")
+
+        try {
+            // Tìm EOCD trong 65KB cuối tệp
+            val searchLen = Math.min(65557L, fileLength).toInt()
+            val tailBuf = ByteArray(searchLen)
+            raf.seek(fileLength - searchLen)
+            raf.readFully(tailBuf)
+
+            var eocdPosInTail = -1
+            for (i in searchLen - 22 downTo 0) {
+                if (tailBuf[i] == 0x50.toByte() && tailBuf[i + 1] == 0x4B.toByte() && tailBuf[i + 2] == 0x05.toByte() && tailBuf[i + 3] == 0x06.toByte()) {
+                    eocdPosInTail = i
+                    break
+                }
+            }
+            if (eocdPosInTail == -1) throw IllegalStateException("Không tìm thấy ZIP EOCD trong APK")
+
+            val eocdPos = fileLength - searchLen + eocdPosInTail
+            raf.seek(eocdPos + 12)
+            val cdSize = Integer.reverseBytes(raf.readInt()).toLong() and 0xFFFFFFFFL
+            val cdOffset = Integer.reverseBytes(raf.readInt()).toLong() and 0xFFFFFFFFL
+
+            val sec1Len = cdOffset
+            val sec2Len = cdSize
+            val sec3Len = fileLength - eocdPos
+
+            // Đọc phần sec3 (EOCD)
+            val sec3 = ByteArray(sec3Len.toInt())
+            raf.seek(eocdPos)
+            raf.readFully(sec3)
+
+            // Tính top-level digest qua streaming 1MB chunks (chỉ dùng < 2MB RAM)
+            val topDigest = computeTopDigestStreaming(raf, sec1Len, cdOffset, sec2Len, eocdPos, sec3Len)
+
+            // Xây dựng APK Signing Block v2
+            val certDer = generateSelfSignedCertDer(keyPair)
             val pubDer = keyPair.public.encoded
 
-            // Digest v2 được tính theo từng chunk 1 MiB của ba section ZIP. Việc đọc
-            // trực tiếp từ file giữ peak heap gần như cố định ngay cả với APK lớn.
-            val topDigest = computeTopDigest(apk, sections)
-
-            // Xây dựng APK Signature Scheme v2 Block
             val digestEntry = lpBytes(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(0x0103).array() + lpBytes(topDigest))
             val digests = lpBytes(digestEntry)
-
-            val certs = lpBytes(lpBytes(certificateDer))
+            val certs = lpBytes(lpBytes(certDer))
             val additionalAttrs = lpBytes(ByteArray(0))
 
             val signedDataPayload = digests + certs + additionalAttrs
@@ -224,7 +208,6 @@ object ApkSignerHelper {
             val signer = lpBytes(signedData + signatures + publicKey)
             val signers = lpBytes(signer)
 
-            // ID-value pair: ID 0x7109871a (v2 Scheme)
             var pair = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(4L + signers.size).array() +
                     ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(0x7109871a).array() +
                     signers
@@ -248,128 +231,88 @@ object ApkSignerHelper {
             val footer = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(blockSize).array() + magic
 
             val signingBlock = header + pair + footer
-            val finalCentralDirectoryOffset = sections.centralDirectoryOffset + signingBlock.size
-            if (finalCentralDirectoryOffset > 0xFFFFFFFFL) {
-                throw IllegalStateException("APK quá lớn cho ZIP32 sau khi ký")
+
+            // Cập nhật cdOffset trong EOCD mới
+            val newSec3 = sec3.clone()
+            ByteBuffer.wrap(newSec3, 16, 4).order(ByteOrder.LITTLE_ENDIAN).putInt((cdOffset + signingBlock.size).toInt())
+
+            // Ghi file đầu ra qua Streaming Buffer (không tốn RAM)
+            BufferedOutputStream(FileOutputStream(outputApk), 65536).use { out ->
+                // 1. Ghi Section 1 (0 -> cdOffset)
+                raf.seek(0)
+                copyStreamRange(raf, out, sec1Len)
+
+                // 2. Ghi Signing Block
+                out.write(signingBlock)
+
+                // 3. Ghi Section 2 (Central Directory)
+                raf.seek(cdOffset)
+                copyStreamRange(raf, out, sec2Len)
+
+                // 4. Ghi Section 3 (EOCD với offset mới)
+                out.write(newSec3)
             }
 
-            // EOCD tối đa khoảng 64 KiB nên chỉ phần nhỏ này được giữ trong RAM.
-            val eocd = ByteArray((sections.fileSize - sections.eocdOffset).toInt())
-            apk.seek(sections.eocdOffset)
-            apk.readFully(eocd)
-            ByteBuffer.wrap(eocd, 16, 4).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(finalCentralDirectoryOffset.toInt())
-
-            // Ghi output theo stream, không tạo sec1/sec2 bằng copyOfRange.
-            BufferedOutputStream(FileOutputStream(outputApk)).use { output ->
-                copyRange(apk, output, 0L, sections.centralDirectoryOffset)
-                output.write(signingBlock)
-                copyRange(
-                    apk,
-                    output,
-                    sections.centralDirectoryOffset,
-                    sections.eocdOffset - sections.centralDirectoryOffset
-                )
-                output.write(eocd)
-            }
+        } finally {
+            raf.close()
         }
     }
 
-    private data class ZipSections(
-        val centralDirectoryOffset: Long,
-        val centralDirectorySize: Long,
-        val eocdOffset: Long,
-        val fileSize: Long
-    )
-
-    private fun findZipSections(apk: RandomAccessFile): ZipSections {
-        val fileSize = apk.length()
-        if (fileSize < 22L) throw IllegalStateException("APK không có ZIP EOCD hợp lệ")
-
-        val tailSize = Math.min(fileSize, 65557L).toInt()
-        val tail = ByteArray(tailSize)
-        val tailStart = fileSize - tailSize
-        apk.seek(tailStart)
-        apk.readFully(tail)
-
-        for (i in tail.size - 22 downTo 0) {
-            if (tail[i] != 0x50.toByte() || tail[i + 1] != 0x4B.toByte() ||
-                tail[i + 2] != 0x05.toByte() || tail[i + 3] != 0x06.toByte()
-            ) continue
-
-            val commentLength = littleEndianUShort(tail, i + 20)
-            if (i + 22 + commentLength != tail.size) continue
-
-            val centralDirectorySize = littleEndianUInt(tail, i + 12)
-            val centralDirectoryOffset = littleEndianUInt(tail, i + 16)
-            val eocdOffset = tailStart + i
-            if (centralDirectoryOffset + centralDirectorySize > eocdOffset) {
-                throw IllegalStateException("ZIP Central Directory vượt quá vị trí EOCD")
-            }
-            return ZipSections(centralDirectoryOffset, centralDirectorySize, eocdOffset, fileSize)
-        }
-        throw IllegalStateException("Không tìm thấy ZIP EOCD trong APK")
-    }
-
-    private fun computeTopDigest(apk: RandomAccessFile, sections: ZipSections): ByteArray {
-        val md = MessageDigest.getInstance("SHA-256")
-        val chunkHashes = ByteArrayOutputStream()
-        var chunkCount = 0
-        val chunkBuffer = ByteArray(1024 * 1024)
-
-        val ranges = arrayOf(
-            0L to sections.centralDirectoryOffset,
-            sections.centralDirectoryOffset to (sections.eocdOffset - sections.centralDirectoryOffset),
-            sections.eocdOffset to (sections.fileSize - sections.eocdOffset)
-        )
-        for ((start, length) in ranges) {
-            var position = start
-            var remaining = length
-            while (remaining > 0L) {
-                val chunkSize = Math.min(chunkBuffer.size.toLong(), remaining).toInt()
-                apk.seek(position)
-                apk.readFully(chunkBuffer, 0, chunkSize)
-                md.reset()
-                md.update(0xA5.toByte())
-                md.update(littleEndianInt(chunkSize))
-                md.update(chunkBuffer, 0, chunkSize)
-                chunkHashes.write(md.digest())
-                chunkCount++
-                position += chunkSize
-                remaining -= chunkSize
-            }
-        }
-
-        md.reset()
-        md.update(0x5A.toByte())
-        md.update(littleEndianInt(chunkCount))
-        md.update(chunkHashes.toByteArray())
-        return md.digest()
-    }
-
-    private fun copyRange(input: RandomAccessFile, output: OutputStream, start: Long, length: Long) {
-        val buffer = ByteArray(64 * 1024)
-        input.seek(start)
+    private fun copyStreamRange(raf: RandomAccessFile, out: OutputStream, length: Long) {
+        val buf = ByteArray(65536)
         var remaining = length
-        while (remaining > 0L) {
-            val read = input.read(buffer, 0, Math.min(buffer.size.toLong(), remaining).toInt())
-            if (read < 0) throw EOFException("APK kết thúc sớm khi đang ký")
-            output.write(buffer, 0, read)
+        while (remaining > 0) {
+            val toRead = Math.min(buf.size.toLong(), remaining).toInt()
+            val read = raf.read(buf, 0, toRead)
+            if (read == -1) break
+            out.write(buf, 0, read)
             remaining -= read
         }
     }
 
-    private fun littleEndianInt(value: Int): ByteArray =
-        ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array()
+    private fun computeTopDigestStreaming(
+        raf: RandomAccessFile,
+        sec1Len: Long,
+        sec2Offset: Long,
+        sec2Len: Long,
+        sec3Offset: Long,
+        sec3Len: Long
+    ): ByteArray {
+        val md = MessageDigest.getInstance("SHA-256")
+        val chunkHashes = ByteArrayOutputStream()
+        var chunkCount = 0
 
-    private fun littleEndianUShort(bytes: ByteArray, offset: Int): Int =
-        (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+        val chunkBuf = ByteArray(1048576) // 1MB buffer tái sử dụng
+        val sections = listOf(
+            Pair(0L, sec1Len),
+            Pair(sec2Offset, sec2Len),
+            Pair(sec3Offset, sec3Len)
+        )
 
-    private fun littleEndianUInt(bytes: ByteArray, offset: Int): Long =
-        (bytes[offset].toLong() and 0xFF) or
-                ((bytes[offset + 1].toLong() and 0xFF) shl 8) or
-                ((bytes[offset + 2].toLong() and 0xFF) shl 16) or
-                ((bytes[offset + 3].toLong() and 0xFF) shl 24)
+        for ((startOff, len) in sections) {
+            raf.seek(startOff)
+            var remaining = len
+            while (remaining > 0) {
+                val chunkSize = Math.min(chunkBuf.size.toLong(), remaining).toInt()
+                raf.readFully(chunkBuf, 0, chunkSize)
+
+                val prefix = byteArrayOf(0xA5.toByte()) + ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
+                md.reset()
+                md.update(prefix)
+                md.update(chunkBuf, 0, chunkSize)
+                chunkHashes.write(md.digest())
+                chunkCount++
+
+                remaining -= chunkSize
+            }
+        }
+
+        val topPrefix = byteArrayOf(0x5A.toByte()) + ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkCount).array()
+        md.reset()
+        md.update(topPrefix)
+        md.update(chunkHashes.toByteArray())
+        return md.digest()
+    }
 
     private fun lpBytes(b: ByteArray): ByteArray {
         return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(b.size).array() + b
@@ -384,12 +327,7 @@ object ApkSignerHelper {
         val serial = derInt(1)
         val sigAlgo = derSeq(derOid(byteArrayOf(0x2A, 0x86.toByte(), 0x48, 0x86.toByte(), 0xF7.toByte(), 0x0D, 0x01, 0x01, 0x0B)) + derNull())
         val issuer = derSeq(derSet(derSeq(derOid(byteArrayOf(0x55, 0x04, 0x03)) + derUtf8String("AppCloner Studio Root CA"))))
-        // Dùng validity cố định để certificate DER không đổi giữa các lần chạy.
-        // Android so sánh certificate khi cài đè, không chỉ so sánh public key.
-        val validity = derSeq(
-            derUtcTime(Date(1577836800000L)) + // 2020-01-01 UTC
-                    derUtcTime(Date(2524607999000L)) // 2049-12-31 UTC
-        )
+        val validity = derSeq(derUtcTime(Date(System.currentTimeMillis() - 86400000L)) + derUtcTime(Date(System.currentTimeMillis() + 86400000L * 365 * 25)))
         val subject = issuer
 
         val tbsCertificate = derSeq(
@@ -441,7 +379,7 @@ object ApkSignerHelper {
             signerInfos
         )
 
-        return derSeq(derOid(oidSignedData) + derExplicit(0, signedData))
+        return derSeq(oidSignedData + derExplicit(0, signedData))
     }
 
     private fun derLen(len: Int): ByteArray {

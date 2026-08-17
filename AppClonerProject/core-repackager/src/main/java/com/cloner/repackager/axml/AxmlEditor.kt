@@ -10,8 +10,8 @@ import java.nio.ByteOrder
  * - Định vị chính xác attribute `package` của thẻ `<manifest>`
  * - Định vị chính xác attribute `authorities` của tất cả thẻ `<provider>` (kể cả AdMob, Firebase, FileProvider...)
  * - Định vị chính xác attribute `name` của tất cả thẻ `<permission>` và `<uses-permission>`
- * - Mở rộng toàn bộ class name relative (.MainActivity -> com.orig.MainActivity)
- * - Giữ nguyên toàn bộ các class bytecode khác để DEX thực thi trơn tru
+ * - Mở rộng toàn bộ class name relative/unqualified sang tên lớp đầy đủ trong DEX
+ * - Ép bật extractNativeLibs="true" để load native library .so không bị lỗi page-alignment dlopen
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
@@ -27,7 +27,8 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         newApplicationClass: String? = null,
         authoritySuffix: String = ".clone"
     ): ByteArray {
-        val buffer = ByteBuffer.wrap(manifestBytes).order(ByteOrder.LITTLE_ENDIAN)
+        val workingBytes = manifestBytes.clone()
+        val buffer = ByteBuffer.wrap(workingBytes).order(ByteOrder.LITTLE_ENDIAN)
         val magic = buffer.int
         if (magic != CHUNK_AXML_FILE) {
             throw IllegalArgumentException("Tệp không phải định dạng Binary AXML hợp lệ (Magic: 0x${Integer.toHexString(magic)})")
@@ -63,7 +64,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             if (absoluteStylesStart !in 8..absolutePoolEnd) {
                 throw IllegalArgumentException("String pool có stylesStart không hợp lệ")
             }
-            manifestBytes.copyOfRange(absoluteStylesStart, absolutePoolEnd)
+            workingBytes.copyOfRange(absoluteStylesStart, absolutePoolEnd)
         } else {
             ByteArray(0)
         }
@@ -86,26 +87,26 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         val componentIndices = HashSet<Int>()
 
         var idx = 8 + stringPoolSize
-        while (idx < manifestBytes.size - 8) {
-            val chunkType = ByteBuffer.wrap(manifestBytes, idx, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
-            val chunkSize = ByteBuffer.wrap(manifestBytes, idx + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        while (idx < workingBytes.size - 8) {
+            val chunkType = ByteBuffer.wrap(workingBytes, idx, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+            val chunkSize = ByteBuffer.wrap(workingBytes, idx + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
-            if (chunkType == 0x0102 && idx + 30 <= manifestBytes.size) { // XML_START_ELEMENT
-                val tagNameIdx = ByteBuffer.wrap(manifestBytes, idx + 20, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                val attrStart = ByteBuffer.wrap(manifestBytes, idx + 24, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
-                val attrSize = ByteBuffer.wrap(manifestBytes, idx + 26, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
-                val attrCount = ByteBuffer.wrap(manifestBytes, idx + 28, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+            if (chunkType == 0x0102 && idx + 30 <= workingBytes.size) { // XML_START_ELEMENT
+                val tagNameIdx = ByteBuffer.wrap(workingBytes, idx + 20, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                val attrStart = ByteBuffer.wrap(workingBytes, idx + 24, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                val attrSize = ByteBuffer.wrap(workingBytes, idx + 26, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                val attrCount = ByteBuffer.wrap(workingBytes, idx + 28, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
 
                 val tagName = if (tagNameIdx in 0 until stringsList.size) stringsList[tagNameIdx] else ""
                 val attrOffset = idx + 16 + attrStart
 
                 for (a in 0 until attrCount) {
                     val aOff = attrOffset + (a * attrSize)
-                    if (aOff + 20 <= manifestBytes.size) {
-                        val aNameIdx = ByteBuffer.wrap(manifestBytes, aOff + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                        val aRawValIdx = ByteBuffer.wrap(manifestBytes, aOff + 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                        val tvType = manifestBytes[aOff + 15].toInt() and 0xFF
-                        val tvData = ByteBuffer.wrap(manifestBytes, aOff + 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                    if (aOff + 20 <= workingBytes.size) {
+                        val aNameIdx = ByteBuffer.wrap(workingBytes, aOff + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                        val aRawValIdx = ByteBuffer.wrap(workingBytes, aOff + 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                        val tvType = workingBytes[aOff + 15].toInt() and 0xFF
+                        val tvData = ByteBuffer.wrap(workingBytes, aOff + 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
                         val valIdx = if (aRawValIdx != -1 && aRawValIdx in 0 until stringsList.size) {
                             aRawValIdx
@@ -115,9 +116,18 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
                             -1
                         }
 
-                        if (valIdx != -1) {
-                            val attrName = if (aNameIdx in 0 until stringsList.size) stringsList[aNameIdx] else ""
+                        val attrName = if (aNameIdx in 0 until stringsList.size) stringsList[aNameIdx] else ""
 
+                        // Ép bật extractNativeLibs="true" nếu thuộc tính này có trong <application>
+                        if (tagName == "application" && attrName == "extractNativeLibs" && tvType == 18) {
+                            // Set boolean data = 0xFFFFFFFF (true)
+                            workingBytes[aOff + 16] = 0xFF.toByte()
+                            workingBytes[aOff + 17] = 0xFF.toByte()
+                            workingBytes[aOff + 18] = 0xFF.toByte()
+                            workingBytes[aOff + 19] = 0xFF.toByte()
+                        }
+
+                        if (valIdx != -1) {
                             when {
                                 tagName == "manifest" && attrName == "package" -> packageIndices.add(valIdx)
                                 tagName == "provider" && attrName == "authorities" -> authorityIndices.add(valIdx)
@@ -182,11 +192,23 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             }
         }
 
-        // 2e. Mở rộng tên lớp tương đối (.MainActivity -> com.orig.MainActivity)
+        // 2e. Mở rộng và chuẩn hóa tên lớp component để ClassLoader tìm thấy 100%
         for (cIdx in componentIndices) {
             val oldClass = stringsList[cIdx]
-            if (oldClass.startsWith(".")) {
-                modifiedStrings[cIdx] = "$originalPackage$oldClass"
+            when {
+                dexClasses.contains(oldClass) -> {
+                    // Tên lớp bytecode đầy đủ đã có trong DEX -> GIỮ NGUYÊN 100%
+                    modifiedStrings[cIdx] = oldClass
+                }
+                dexClasses.contains("$originalPackage.$oldClass") -> {
+                    modifiedStrings[cIdx] = "$originalPackage.$oldClass"
+                }
+                oldClass.startsWith(".") -> {
+                    modifiedStrings[cIdx] = "$originalPackage$oldClass"
+                }
+                !oldClass.contains(".") -> {
+                    modifiedStrings[cIdx] = "$originalPackage.$oldClass"
+                }
             }
         }
 
@@ -208,7 +230,8 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             isUtf8 = isUtf8,
             originalFlags = flags,
             styleOffsets = styleOffsets,
-            styleData = styleData
+            styleData = styleData,
+            workingBytes = workingBytes
         )
     }
 
@@ -246,7 +269,8 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         isUtf8: Boolean,
         originalFlags: Int,
         styleOffsets: IntArray,
-        styleData: ByteArray
+        styleData: ByteArray,
+        workingBytes: ByteArray
     ): ByteArray {
         val out = ByteArrayOutputStream()
         val strOffsets = mutableListOf<Int>()
@@ -281,7 +305,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         spHeader.putInt(newStylesStart)
 
         val xmlBodyStart = 8 + originalStringPoolSize
-        val xmlBody = manifestBytes.copyOfRange(xmlBodyStart, manifestBytes.size)
+        val xmlBody = workingBytes.copyOfRange(xmlBodyStart, workingBytes.size)
 
         val totalFileSize = 8 + newStringPoolTotalSize + xmlBody.size
         val axmlHeader = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
