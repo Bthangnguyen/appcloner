@@ -6,11 +6,9 @@ import java.nio.ByteOrder
 
 /**
  * AxmlEditor: Trình phân tích và sửa đổi trực tiếp tệp AndroidManifest.xml nhị phân (Binary AXML).
- * - Hỗ trợ chuẩn hóa độ dài UTF-8 / UTF-16 varint cho chuỗi dài (>127 ký tự)
- * - Tự động xóa cờ SORTED để chống lỗi Bad String Pool trong AssetManager của Android
- * - Mở rộng class relative (.MainActivity -> com.orig.MainActivity)
- * - Giữ nguyên bytecode class names gốc để không gây ClassNotFoundException
- * - Thay đổi ContentProvider authorities & Custom permissions để tránh xung đột
+ * - Sử dụng danh sách dexClasses để giữ nguyên các class bytecode thực tế, tránh ClassNotFoundException
+ * - Tự động đổi toàn bộ ContentProvider authorities và Permissions sang newPackage để tránh xung đột
+ * - Xóa cờ SORTED và mã hóa Varint UTF-8 / UTF-16 chuẩn xác 100%
  */
 class AxmlEditor(private val manifestBytes: ByteArray) {
 
@@ -22,6 +20,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
     fun modifyManifest(
         originalPackage: String,
         newPackage: String,
+        dexClasses: Set<String> = emptySet(),
         newApplicationClass: String? = null,
         authoritySuffix: String = ".clone"
     ): ByteArray {
@@ -61,7 +60,7 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             stringsList.add(str)
         }
 
-        // Biến đổi chuỗi thông minh
+        // Biến đổi chuỗi thông minh đối chiếu với DEX Class Table
         val modifiedStrings = stringsList.map { originalStr ->
             when {
                 // 1. Tên package gốc -> Tên package clone mới
@@ -70,13 +69,16 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
                 // 2. Class relative (".MainActivity") -> Mở rộng thành "originalPackage.MainActivity"
                 originalStr.startsWith(".") -> "$originalPackage$originalStr"
 
-                // 3. Custom permissions & receiver permissions của app
+                // 3. Nếu là class bytecode có trong DEX -> GIỮ NGUYÊN 100% để ClassLoader khởi chạy được!
+                dexClasses.contains(originalStr) -> originalStr
+
+                // 4. Custom permissions & receiver permissions của app -> Thay bằng newPackage
                 originalStr.startsWith(originalPackage) && (originalStr.contains("permission") || originalStr.contains("DYNAMIC_RECEIVER") || originalStr.contains("PROTECTED")) -> {
                     originalStr.replace(originalPackage, newPackage)
                 }
 
-                // 4. ContentProvider authorities
-                originalStr.contains("provider") || originalStr.contains("fileprovider") -> {
+                // 5. ContentProvider authorities & AndroidX startup -> Thay bằng newPackage
+                originalStr.contains("provider") || originalStr.contains("fileprovider") || originalStr.contains("startup") || originalStr.contains("authorit") -> {
                     if (originalStr.startsWith(originalPackage)) {
                         originalStr.replace(originalPackage, newPackage)
                     } else if (!originalStr.endsWith(authoritySuffix)) {
@@ -86,7 +88,12 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
                     }
                 }
 
-                // 5. Mọi class name khác (kể cả Activities, Services, Application...) -> GIỮ NGUYÊN
+                // 6. Các chuỗi bắt đầu bằng originalPackage mà không phải class bytecode -> Thay bằng newPackage
+                originalStr.startsWith(originalPackage) && !dexClasses.contains(originalStr) -> {
+                    originalStr.replace(originalPackage, newPackage)
+                }
+
+                // 7. Mọi chuỗi khác giữ nguyên
                 else -> originalStr
             }
         }
@@ -141,7 +148,6 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
             }
         }
 
-        // Căn chỉnh 4-byte padding cho String Pool Data
         while (strDataOut.size() % 4 != 0) {
             strDataOut.write(0)
         }
@@ -150,7 +156,6 @@ class AxmlEditor(private val manifestBytes: ByteArray) {
         val newStringsStart = 28 + (stringCount * 4) + (styleCount * 4)
         val newStringPoolTotalSize = newStringsStart + strDataOut.size()
 
-        // Cờ flags: Chỉ bật cờ UTF-8 (0x100), tắt cờ SORTED (0x1) để tránh lỗi binary search trên chuỗi đã sửa
         val cleanFlags = if (isUtf8) (1 shl 8) else 0
 
         val spHeader = ByteBuffer.allocate(28).order(ByteOrder.LITTLE_ENDIAN)

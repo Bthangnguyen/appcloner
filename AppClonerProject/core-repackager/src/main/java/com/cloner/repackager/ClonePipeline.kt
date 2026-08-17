@@ -1,6 +1,7 @@
 package com.cloner.repackager
 
 import com.cloner.repackager.axml.AxmlEditor
+import com.cloner.repackager.dex.DexClassParser
 import com.cloner.repackager.signer.ApkSignerHelper
 import java.io.*
 import java.util.zip.ZipEntry
@@ -37,7 +38,6 @@ data class CloneConfig(
 
 /**
  * ClonePipeline: Điều phối toàn bộ quy trình nhân bản APK.
- * Hỗ trợ tự động hợp nhất các tệp Split APKs (App Bundle / Fused APK) thành một tệp APK độc lập hoàn chỉnh.
  */
 class ClonePipeline(private val config: CloneConfig) {
 
@@ -54,18 +54,47 @@ class ClonePipeline(private val config: CloneConfig) {
         val tempUnsignedApk = File(outputApk.parentFile, "temp_unsigned_${System.currentTimeMillis()}.apk")
 
         try {
-            listener?.onProgress("Đang phân tích cấu trúc APK & hợp nhất Split APKs...", 10)
+            listener?.onProgress("Đang phân tích cấu trúc APK & trích xuất DEX classes...", 10)
+
+            // Bước 1: Trích xuất toàn bộ danh sách lớp bytecode từ các file DEX
+            val dexClasses = HashSet<String>()
+            val baseApk = sourceApks[0]
+            val baseZip = ZipFile(baseApk)
+            var baseEntries = baseZip.entries()
+
+            while (baseEntries.hasMoreElements()) {
+                val entry = baseEntries.nextElement()
+                if (entry.name.endsWith(".dex")) {
+                    val dexBytes = baseZip.getInputStream(entry).use { it.readBytes() }
+                    dexClasses.addAll(DexClassParser.extractClasses(dexBytes))
+                }
+            }
+
+            // Quét thêm các file split APK nếu có
+            for (i in 1 until sourceApks.size) {
+                val splitFile = sourceApks[i]
+                if (splitFile.exists()) {
+                    val splitZip = ZipFile(splitFile)
+                    val sEntries = splitZip.entries()
+                    while (sEntries.hasMoreElements()) {
+                        val entry = sEntries.nextElement()
+                        if (entry.name.endsWith(".dex")) {
+                            val dexBytes = splitZip.getInputStream(entry).use { it.readBytes() }
+                            dexClasses.addAll(DexClassParser.extractClasses(dexBytes))
+                        }
+                    }
+                    splitZip.close()
+                }
+            }
+
             val zipOut = ZipOutputStream(FileOutputStream(tempUnsignedApk))
             val buffer = ByteArray(8192)
             val addedEntries = HashSet<String>()
 
-            val baseApk = sourceApks[0]
-            val baseZip = ZipFile(baseApk)
-            val baseEntries = baseZip.entries()
-
             listener?.onProgress("Đang tái cấu trúc AndroidManifest & thay đổi Icon...", 30)
 
-            // 1. Sao chép và xử lý các tệp từ Base APK
+            // Bước 2: Tái tạo Base APK
+            baseEntries = baseZip.entries()
             while (baseEntries.hasMoreElements()) {
                 val entry = baseEntries.nextElement()
                 val entryName = entry.name
@@ -78,6 +107,7 @@ class ClonePipeline(private val config: CloneConfig) {
                         val modifiedManifest = editor.modifyManifest(
                             originalPackage = config.originalPackageName,
                             newPackage = config.newPackageName,
+                            dexClasses = dexClasses,
                             newApplicationClass = "com.cloner.runtime.AppClonerApplication"
                         )
 
@@ -119,7 +149,7 @@ class ClonePipeline(private val config: CloneConfig) {
             }
             baseZip.close()
 
-            // 2. Hợp nhất các tệp từ Split APKs (native libraries .so, assets, splits)
+            // Bước 3: Hợp nhất Split APKs
             if (sourceApks.size > 1) {
                 listener?.onProgress("Đang hợp nhất thư viện native và tài nguyên splits...", 50)
                 for (i in 1 until sourceApks.size) {
@@ -133,7 +163,6 @@ class ClonePipeline(private val config: CloneConfig) {
                         val entry = splitEntries.nextElement()
                         val entryName = entry.name
 
-                        // Bỏ qua manifest và chữ ký của split APK
                         if (entryName == "AndroidManifest.xml" || entryName.startsWith("META-INF/") || addedEntries.contains(entryName)) {
                             continue
                         }
@@ -159,13 +188,13 @@ class ClonePipeline(private val config: CloneConfig) {
                 }
             }
 
-            // 3. Ghi file cấu hình runtime vào assets/
+            // Bước 4: Nhúng cấu hình Runtime giả lập
             listener?.onProgress("Đang nhúng cấu hình giả lập danh tính & proxy...", 70)
             injectRuntimeConfig(zipOut)
 
             zipOut.close()
 
-            // 4. Ký số kép v1 + v2 cho APK đầu ra
+            // Bước 5: Ký số kép v1 + v2
             listener?.onProgress("Đang tạo chữ ký số kép v1/v2 chuẩn Android 14...", 85)
             ApkSignerHelper.signApk(tempUnsignedApk, outputApk)
 
