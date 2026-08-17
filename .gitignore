@@ -7,7 +7,9 @@ build_out/
 *.log
 
 # Large External Tools & Decompiled Caches
-tools/
+tools/jdk17/
+tools/kotlinc/
+tools/jadx-gui/
 decompiled_src/
 .system_generated/
 

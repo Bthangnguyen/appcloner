@@ -34,6 +34,8 @@ data class CloneConfig(
     val fakeFingerprint: String? = null,
     val fakeDrmId: String? = null,
     val fakeImsi: String? = null,
+    // Thư viện Native C/C++ bổ trợ (.so)
+    val nativeLibsMap: Map<String, ByteArray>? = null,
     // Proxy mạng cố định theo app
     val proxyHost: String? = null,
     val proxyPort: Int? = null,
@@ -131,6 +133,7 @@ class ClonePipeline(private val config: CloneConfig) {
             val zipOut = ZipOutputStream(BufferedOutputStream(FileOutputStream(tempUnsignedApk), 65536))
             val buffer = ByteArray(65536)
             var originalAppClass: String? = null
+            val existingEntries = HashSet<String>()
 
             listener?.onProgress("Đang tái cấu trúc AndroidManifest & Icon...", 30)
 
@@ -139,6 +142,7 @@ class ClonePipeline(private val config: CloneConfig) {
             while (baseEntries.hasMoreElements()) {
                 val entry = baseEntries.nextElement()
                 val entryName = entry.name
+                existingEntries.add(entryName)
 
                 val isIconImage = config.modifiedIconBytes != null &&
                         (entryName.startsWith("res/mipmap") || entryName.startsWith("res/drawable")) &&
@@ -223,6 +227,18 @@ class ClonePipeline(private val config: CloneConfig) {
                 zipOut.putNextEntry(dexEntry)
                 zipOut.write(config.runtimeDexBytes)
                 zipOut.closeEntry()
+            }
+
+            // Bước 3b: Tiêm Thư viện Native C/C++ (libappcloner.so, libsystem.so, libtun2socks.so)
+            if (config.nativeLibsMap != null) {
+                for ((libPath, libBytes) in config.nativeLibsMap) {
+                    if (!existingEntries.contains(libPath)) {
+                        val libEntry = ZipEntry(libPath)
+                        zipOut.putNextEntry(libEntry)
+                        zipOut.write(libBytes)
+                        zipOut.closeEntry()
+                    }
+                }
             }
 
             // Bước 4: Nhúng cấu hình Runtime giả lập

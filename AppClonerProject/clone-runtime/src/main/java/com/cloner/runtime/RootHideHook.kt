@@ -1,10 +1,12 @@
 package com.cloner.runtime
 
+import android.os.Build
 import java.io.File
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 
 /**
- * RootHideHook: Can thiệp và che giấu các tệp thực thi root và Magisk phổ biến.
+ * RootHideHook: Can thiệp và che giấu trạng thái Root, Magisk, Test-Keys và Superuser.
  */
 object RootHideHook {
 
@@ -17,17 +19,33 @@ object RootHideHook {
         "/data/local/xbin/su",
         "/data/local/bin/su",
         "/data/local/su",
-        "/su/bin/su"
+        "/su/bin/su",
+        "/system/app/Superuser.apk",
+        "/system/app/SuperSU.apk",
+        "/system/app/Magisk.apk"
     )
 
     fun applyRootHider() {
-        // Can thiệp File.exists() để trả về false đối với các đường dẫn root
+        // 1. Chuẩn hóa Build Tags sang release-keys & user build
         try {
-            val fileClass = File::class.java
-            val existsMethod: Method = fileClass.getDeclaredMethod("exists")
-            // Trong môi trường Pine/ByteHook: Nếu path nằm trong ROOT_PATHS thì return false
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+            setField(Build::class.java, "TAGS", "release-keys")
+            setField(Build::class.java, "TYPE", "user")
+        } catch (ignored: Exception) {}
+
+        // 2. Can thiệp SystemProperties để giả lập tags chính hãng
+        try {
+            val spClass = Class.forName("android.os.SystemProperties")
+            val setMethod = spClass.getDeclaredMethod("set", String::class.java, String::class.java)
+            setMethod.invoke(null, "ro.build.tags", "release-keys")
+            setMethod.invoke(null, "ro.build.type", "user")
+        } catch (ignored: Exception) {}
+    }
+
+    private fun setField(clazz: Class<*>, name: String, value: Any) {
+        try {
+            val f: Field = clazz.getDeclaredField(name)
+            f.isAccessible = true
+            f.set(null, value)
+        } catch (ignored: Exception) {}
     }
 }

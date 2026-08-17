@@ -10,7 +10,7 @@ import org.json.JSONObject
 /**
  * ClonerInitProvider: ContentProvider khởi động tự động có độ ưu tiên cao nhất.
  * Chạy TRƯỚC Application.onCreate() và TRƯỚC mọi Activity/Service.
- * Giúp kích hoạt ma trận Hook (Fake ID, IMEI, Model, GPS, Signature Spoofing, SSL Unpinning)
+ * Giúp kích hoạt ma trận Hook (Fake ID, IMEI, Model, GPS, Signature Spoofing, SSL Unpinning, Native Hooks)
  * mà KHÔNG CẦN thay đổi lớp <application android:name="..."> -> Tránh 100% lỗi ClassCastException!
  */
 class ClonerInitProvider : ContentProvider() {
@@ -23,6 +23,14 @@ class ClonerInitProvider : ContentProvider() {
 
     private fun loadConfigAndApplyHooks(context: Context) {
         try {
+            // Nạp các thư viện Native nếu có
+            try {
+                System.loadLibrary("appcloner")
+            } catch (ignored: Throwable) {}
+            try {
+                System.loadLibrary("system")
+            } catch (ignored: Throwable) {}
+
             val jsonStr = context.assets.open("cloner_runtime_config.json").bufferedReader().use { it.readText() }
             val json = JSONObject(jsonStr)
 

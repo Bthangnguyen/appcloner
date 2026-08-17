@@ -128,9 +128,13 @@ with zipfile.ZipFile(res_apk, 'r') as zin, zipfile.ZipFile(unaligned_apk, 'w') a
     for item in zin.infolist():
         zout.writestr(item, zin.read(item.filename))
     zout.write(dex_file, "classes.dex")
-    zout.write(assets_runtime_dex, "assets/runtime_classes.dex")
+    for root, dirs, files in os.walk(assets_dir):
+        for f in files:
+            fp = os.path.join(root, f)
+            rel = os.path.relpath(fp, assets_dir).replace("\\", "/")
+            zout.write(fp, f"assets/{rel}")
 
-print("    [OK] Added classes.dex and assets/runtime_classes.dex into APK package!")
+print("    [OK] Added classes.dex, runtime_classes.dex, and native_libs into APK package!")
 
 # 9. Zipalign can chinh 4-byte
 aligned_apk = os.path.join(BUILD_DIR, "aligned.apk")
