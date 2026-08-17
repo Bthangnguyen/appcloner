@@ -39,6 +39,7 @@ object PineHookManager {
 
         applyDeviceBuildHooks(config)
         applySystemPropertiesHooks(config)
+        applyPackageNameSpoofing(context, config)
         applySignatureVerificationBypass(context, config)
         if (config.unpinSsl) {
             applySslPinningBypass()
@@ -77,7 +78,6 @@ object PineHookManager {
     private fun applySystemPropertiesHooks(config: ClonerRuntimeConfig) {
         try {
             val sysPropClass = Class.forName("android.os.SystemProperties")
-            // Nạp bảng map các thuộc tính giả lập
             val propMap = mutableMapOf<String, String>()
             config.fakeModel?.let {
                 propMap["ro.product.model"] = it
@@ -99,13 +99,69 @@ object PineHookManager {
     }
 
     /**
-     * 3. Signature Verification Bypass (Vượt qua kiểm tra chữ ký số gốc của TikTok/Facebook)
+     * Can thiệp Package Name để vượt qua cơ chế Anti-Clone / Integrity Check (như Device Info HW)
+     */
+    private fun applyPackageNameSpoofing(context: Context, config: ClonerRuntimeConfig) {
+        val origPkg = config.originalPackageName
+        if (origPkg.isEmpty() || origPkg == config.newPackageName) return
+
+        try {
+            // 1. Spoof ActivityThread sCurrentPackageName & mBoundApplication.appInfo.packageName
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val currentActivityThreadMethod = activityThreadClass.getDeclaredMethod("currentActivityThread")
+            currentActivityThreadMethod.isAccessible = true
+            val activityThread = currentActivityThreadMethod.invoke(null)
+            if (activityThread != null) {
+                try {
+                    val sCurrentPackageNameField = activityThreadClass.getDeclaredField("sCurrentPackageName")
+                    sCurrentPackageNameField.isAccessible = true
+                    sCurrentPackageNameField.set(null, origPkg)
+                } catch (ignored: Throwable) {}
+
+                try {
+                    val mBoundApplicationField = activityThreadClass.getDeclaredField("mBoundApplication")
+                    mBoundApplicationField.isAccessible = true
+                    val boundApp = mBoundApplicationField.get(activityThread)
+                    if (boundApp != null) {
+                        val appInfoField = boundApp.javaClass.getDeclaredField("appInfo")
+                        appInfoField.isAccessible = true
+                        val appInfo = appInfoField.get(boundApp) as? android.content.pm.ApplicationInfo
+                        appInfo?.packageName = origPkg
+                    }
+                } catch (ignored: Throwable) {}
+            }
+        } catch (ignored: Throwable) {}
+
+        try {
+            // 2. Spoof ContextImpl.mPackageInfo.mPackageName
+            var currCtx: Context? = context
+            while (currCtx is android.content.ContextWrapper) {
+                currCtx = currCtx.baseContext
+            }
+            if (currCtx != null && currCtx.javaClass.name == "android.app.ContextImpl") {
+                val mPackageInfoField = currCtx.javaClass.getDeclaredField("mPackageInfo")
+                mPackageInfoField.isAccessible = true
+                val loadedApk = mPackageInfoField.get(currCtx)
+                if (loadedApk != null) {
+                    val mPackageNameField = loadedApk.javaClass.getDeclaredField("mPackageName")
+                    mPackageNameField.isAccessible = true
+                    mPackageNameField.set(loadedApk, origPkg)
+                }
+            }
+        } catch (ignored: Throwable) {}
+    }
+
+    /**
+     * 3. Signature Verification Bypass (Vượt qua kiểm tra chữ ký số gốc của TikTok/Facebook/Device Info HW)
      */
     private fun applySignatureVerificationBypass(context: Context, config: ClonerRuntimeConfig) {
-        val origSigBase64 = config.originalSignatureBase64 ?: return
+        val origSigBase64 = config.originalSignatureBase64
+        val origPkg = config.originalPackageName
         try {
-            val rawSigBytes = Base64.decode(origSigBase64, Base64.DEFAULT)
-            val fakeSignature = Signature(rawSigBytes)
+            val fakeSignature = if (!origSigBase64.isNullOrEmpty()) {
+                val rawSigBytes = Base64.decode(origSigBase64, Base64.DEFAULT)
+                Signature(rawSigBytes)
+            } else null
 
             val pm = context.packageManager
             val pmClass = pm.javaClass
@@ -125,12 +181,19 @@ object PineHookManager {
                     if (method.name.startsWith("getPackageInfo") && result is PackageInfo) {
                         val requestedPkg = args?.getOrNull(0) as? String
                         if (requestedPkg == config.newPackageName || requestedPkg == config.originalPackageName) {
-                            result.signatures = arrayOf(fakeSignature)
-                            try {
-                                val signingInfoField = PackageInfo::class.java.getDeclaredField("signingInfo")
-                                signingInfoField.isAccessible = true
-                                // Cập nhật signingInfo nếu trên Android 9+
-                            } catch (ignored: Exception) {}
+                            if (fakeSignature != null) {
+                                result.signatures = arrayOf(fakeSignature)
+                            }
+                            if (origPkg.isNotEmpty()) {
+                                result.packageName = origPkg
+                            }
+                        }
+                    } else if (method.name.startsWith("getApplicationInfo") && result is android.content.pm.ApplicationInfo) {
+                        val requestedPkg = args?.getOrNull(0) as? String
+                        if (requestedPkg == config.newPackageName || requestedPkg == config.originalPackageName) {
+                            if (origPkg.isNotEmpty()) {
+                                result.packageName = origPkg
+                            }
                         }
                     }
                     result
