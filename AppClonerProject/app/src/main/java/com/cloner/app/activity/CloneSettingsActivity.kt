@@ -3,11 +3,17 @@ package com.cloner.app.activity
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.ProgressDialog
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.*
 import com.cloner.app.R
+import com.cloner.app.util.AppClonerFileProvider
 import com.cloner.app.util.IconProcessor
 import com.cloner.repackager.CloneConfig
 import com.cloner.repackager.ClonePipeline
@@ -115,6 +121,15 @@ class CloneSettingsActivity : Activity() {
         }
     }
 
+    private fun getPublicCloneDir(): File {
+        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val cloneDir = File(downloadDir, "AppCloner")
+        if (!cloneDir.exists()) {
+            cloneDir.mkdirs()
+        }
+        return if (cloneDir.exists() && cloneDir.canWrite()) cloneDir else (getExternalFilesDir("clones") ?: filesDir)
+    }
+
     private fun startCloneProcess() {
         val cloneNumber = etCloneNumber.text.toString().toIntOrNull() ?: 1
         val newPkgName = "${appInfo.packageName}.clone$cloneNumber"
@@ -145,7 +160,7 @@ class CloneSettingsActivity : Activity() {
         Thread {
             try {
                 val srcApk = File(appInfo.sourceDir)
-                val outDir = getExternalFilesDir("clones") ?: filesDir
+                val outDir = getPublicCloneDir()
                 val outApk = File(outDir, "${config.newPackageName}.apk")
 
                 val pipeline = ClonePipeline(config)
@@ -160,11 +175,7 @@ class CloneSettingsActivity : Activity() {
 
                 runOnUiThread {
                     progressDialog.dismiss()
-                    AlertDialog.Builder(this@CloneSettingsActivity)
-                        .setTitle("Nhân bản Thành công!")
-                        .setMessage("Tệp APK clone đã được tạo tại:\n${outApk.absolutePath}\n\nBạn có thể cài đặt ngay bây giờ.")
-                        .setPositiveButton("OK", null)
-                        .show()
+                    showCloneSuccessDialog(outApk, config.newAppName)
                 }
 
             } catch (e: Exception) {
@@ -178,5 +189,40 @@ class CloneSettingsActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun showCloneSuccessDialog(apkFile: File, appName: String) {
+        AlertDialog.Builder(this)
+            .setTitle(" Nhân bản Thành công!")
+            .setMessage("Ứng dụng \"$appName\" đã được nhân bản thành công!\n\n📁 Vị trí lưu file:\nThư mục: Download / AppCloner /\nTên tệp: ${apkFile.name}\n\nBạn có muốn cài đặt ứng dụng vừa nhân bản ngay bây giờ không?")
+            .setPositiveButton(" CÀI ĐẶT NGAY") { _, _ ->
+                installApk(apkFile)
+            }
+            .setNegativeButton("Để sau", null)
+            .show()
+    }
+
+    private fun installApk(file: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!packageManager.canRequestPackageInstalls()) {
+                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                    Toast.makeText(this, "Vui lòng cho phép quyền 'Cài đặt ứng dụng không rõ nguồn gốc' rồi bấm cài đặt lại", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+
+            val apkUri = AppClonerFileProvider.getUriForFile(file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Lỗi khởi động cài đặt: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
     }
 }
