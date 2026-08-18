@@ -1,5 +1,7 @@
 package com.cloner.runtime
 
+import android.app.Activity
+import android.app.Application
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -125,7 +127,11 @@ object PineHookManager {
                 arrayOf(ipmInterface)
             ) { _, method, args ->
                 val result = if (originalIPM != null) {
-                    method.invoke(originalIPM, *(args ?: emptyArray()))
+                    try {
+                        method.invoke(originalIPM, *(args ?: emptyArray()))
+                    } catch (e: Exception) {
+                        e.cause?.let { throw it } ?: throw e
+                    }
                 } else null
 
                 if (method.name.startsWith("getPackageInfo") && result is PackageInfo) {
@@ -146,8 +152,48 @@ object PineHookManager {
                 sPMField.set(null, proxyIPM)
             } catch (ignored: Throwable) {}
 
+            // Hook ContextImpl.sPackageManager static field
+            try {
+                val ciClass = Class.forName("android.app.ContextImpl")
+                val sPMFieldCI = ciClass.getDeclaredField("sPackageManager")
+                sPMFieldCI.isAccessible = true
+                sPMFieldCI.set(null, proxyIPM)
+            } catch (ignored: Throwable) {}
+
+            // Hook Activity Lifecycle để vô hiệu hóa cờ anti-tamper của Device Info HW
+            try {
+                val app = context.applicationContext as? Application
+                app?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+                        bypassAntiTamperInActivity(activity)
+                    }
+                    override fun onActivityStarted(activity: Activity) {
+                        bypassAntiTamperInActivity(activity)
+                    }
+                    override fun onActivityResumed(activity: Activity) {
+                        bypassAntiTamperInActivity(activity)
+                    }
+                    override fun onActivityPaused(activity: Activity) {}
+                    override fun onActivityStopped(activity: Activity) {}
+                    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                    override fun onActivityDestroyed(activity: Activity) {}
+                })
+            } catch (ignored: Throwable) {}
+
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun bypassAntiTamperInActivity(activity: Activity) {
+        if (activity.javaClass.name.contains("DeviceInfoActivity")) {
+            for (fieldName in arrayOf("F", "G", "U", "D", "E")) {
+                try {
+                    val field = activity.javaClass.getDeclaredField(fieldName)
+                    field.isAccessible = true
+                    field.setBoolean(activity, true)
+                } catch (ignored: Throwable) {}
+            }
         }
     }
 
