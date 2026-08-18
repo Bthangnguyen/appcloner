@@ -77,16 +77,43 @@ class TikTokPostForegroundService : Service() {
             MediaScannerConnection.scanFile(this, arrayOf(tempFile.absolutePath), arrayOf("video/mp4"), null)
             Thread.sleep(1500)
 
-            // Bước 2: Cập nhật trạng thái POSTING và mở TikTok Clone
+            // Bước 2: Kích hoạt Chia sẻ Trực Tiếp (ACTION_SEND) mở thẳng trình Đăng của TikTok
             task.status = ScheduleStatus.POSTING
-            task.logMessage = "Đang mở ${task.targetAppName} để đăng video..."
+            task.logMessage = "Đang mở thẳng trình đăng ${task.targetAppName} qua Share Intent..."
             ScheduleStorage.updateTask(this, task)
-            updateNotification("Đang đăng video lên ${task.targetAppName}", "Đang tự động hóa thao tác...")
+            updateNotification("Đang mở ${task.targetAppName}", "Nạp video trực tiếp vào trình đăng bài...")
 
-            val launchIntent = packageManager.getLaunchIntentForPackage(task.targetPackageName)
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                startActivity(launchIntent)
+            val videoUri = com.cloner.app.util.AppClonerFileProvider.getUriForFile(tempFile)
+            val fullText = if (task.hashtags.isNotBlank()) "${task.caption}\n\n${task.hashtags}".trim() else task.caption.trim()
+
+            // Copy vào Clipboard hệ thống
+            try {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("TikTok Caption", fullText)
+                clipboard?.setPrimaryClip(clip)
+            } catch (ignored: Exception) {}
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "video/mp4"
+                putExtra(Intent.EXTRA_STREAM, videoUri)
+                putExtra(Intent.EXTRA_TEXT, fullText)
+                setPackage(task.targetPackageName)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+
+            try {
+                grantUriPermission(task.targetPackageName, videoUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (ignored: Exception) {}
+
+            try {
+                startActivity(shareIntent)
+            } catch (e: Exception) {
+                // Fallback nếu share intent bị lỗi
+                val launchIntent = packageManager.getLaunchIntentForPackage(task.targetPackageName)
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    startActivity(launchIntent)
+                }
             }
 
             // Bước 3: Kích hoạt phiên Accessibility Service

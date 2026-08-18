@@ -90,92 +90,64 @@ class TikTokAutoPostService : AccessibilityService() {
         }
 
         when (currentStep) {
-            1 -> handleStepFindCreateButton(rootNode, session)
-            2 -> handleStepSelectUploadTab(rootNode, session)
-            3 -> handleStepSelectFirstVideo(rootNode, session)
-            4 -> handleStepClickNext(rootNode, session)
-            5 -> handleStepInputCaptionAndPost(rootNode, session)
-            6 -> handleStepVerifyPostSuccess(rootNode, session)
+            1 -> handleDirectShareOrFindNext(rootNode, session)
+            2 -> handleStepInputCaptionAndPost(rootNode, session)
+            3 -> handleStepVerifyPostSuccess(rootNode, session)
         }
     }
 
     /**
-     * Bước 1: Tìm và bấm nút Tạo / Đăng (+) trên màn hình chính TikTok
+     * Bước 1: Xử lý Direct Share Intent (Bấm Tiếp nếu ở màn hình chỉnh sửa, hoặc chuyển thẳng sang nhập Caption)
      */
-    private fun handleStepFindCreateButton(root: AccessibilityNodeInfo, session: AutoPostSession) {
-        val createKeywords = listOf("Tạo", "Create", "Upload", "Tải lên", "+", "Publish", "Record")
-        val createNode = findNodeByKeywords(root, createKeywords) ?: findNodeByIdContains(root, listOf("create_btn", "btn_upload", "tab_publish", "icon_create"))
+    private fun handleDirectShareOrFindNext(root: AccessibilityNodeInfo, session: AutoPostSession) {
+        // Kiểm tra xem đã ở màn hình Đăng bài (Có nút Đăng / Post hoặc ô nhập mô tả) chưa
+        val postKeywords = listOf("Đăng", "Post", "Publish")
+        val postNode = findNodeByKeywords(root, postKeywords) ?: findNodeByIdContains(root, listOf("btn_post", "post_btn", "publish_btn"))
 
-        if (createNode != null && performClick(createNode)) {
-            session.onProgress("Đã bấm nút [+] Tạo video mới")
+        val editKeywords = listOf("mô tả", "Describe", "Thêm mô tả", "Hashtag", "Viết gì đó")
+        val editNode = findNodeByKeywords(root, editKeywords) ?: findNodeByClassName(root, "android.widget.EditText")
+
+        if (postNode != null || editNode != null) {
+            session.onProgress("Đã mở thẳng Màn hình Đăng bài TikTok")
             currentStep = 2
+            handleStepInputCaptionAndPost(root, session)
+            return
         }
-    }
 
-    /**
-     * Bước 2: Chọn nút Album / Tải lên nếu đang ở màn hình Camera quay phim
-     */
-    private fun handleStepSelectUploadTab(root: AccessibilityNodeInfo, session: AutoPostSession) {
-        val albumKeywords = listOf("Tải lên", "Upload", "Album", "Thư viện")
-        val uploadNode = findNodeByKeywords(root, albumKeywords) ?: findNodeByIdContains(root, listOf("upload_btn", "album_btn", "btn_album"))
-
-        if (uploadNode != null && performClick(uploadNode)) {
-            session.onProgress("Đã chuyển sang Thư viện video")
-            currentStep = 3
-        } else {
-            // Nếu đã ở thẳng màn hình chọn video
-            currentStep = 3
-        }
-    }
-
-    /**
-     * Bước 3: Chọn video đầu tiên trong thư viện (vừa tải từ Google Drive về)
-     */
-    private fun handleStepSelectFirstVideo(root: AccessibilityNodeInfo, session: AutoPostSession) {
-        val videoItems = mutableListOf<AccessibilityNodeInfo>()
-        collectClickableNodes(root, videoItems)
-
-        // Tìm checkbox hoặc ô chọn video đầu tiên
-        for (node in videoItems) {
-            val desc = (node.contentDescription ?: "").toString()
-            val text = (node.text ?: "").toString()
-            if (desc.contains("00:") || desc.contains("Video") || text.contains("00:") || node.className == "android.widget.ImageView") {
-                if (performClick(node)) {
-                    session.onProgress("Đã chọn video vừa tải")
-                    currentStep = 4
-                    return
-                }
-            }
-        }
-    }
-
-    /**
-     * Bước 4: Bấm nút "Tiếp tục / Next" qua các bước chỉnh sửa
-     */
-    private fun handleStepClickNext(root: AccessibilityNodeInfo, session: AutoPostSession) {
+        // Nếu đang ở màn hình Chỉnh sửa video (có nút Tiếp / Next)
         val nextKeywords = listOf("Tiếp", "Next", "Tiếp tục", "Xong", "Done")
         val nextNode = findNodeByKeywords(root, nextKeywords) ?: findNodeByIdContains(root, listOf("btn_next", "next_btn", "tv_next"))
 
         if (nextNode != null && performClick(nextNode)) {
             session.onProgress("Đã bấm Tiếp tục sang màn hình Đăng")
-            currentStep = 5
+            currentStep = 2
+            return
+        }
+
+        // Fallback: nếu đang ở màn hình chính (chưa share intent), tìm nút [+] Tạo video
+        val createKeywords = listOf("Tạo", "Create", "Upload", "Tải lên", "+")
+        val createNode = findNodeByKeywords(root, createKeywords) ?: findNodeByIdContains(root, listOf("create_btn", "btn_upload", "tab_publish"))
+        if (createNode != null && performClick(createNode)) {
+            session.onProgress("Đang mở trình chọn video...")
         }
     }
 
     /**
-     * Bước 5: Điền Caption + Hashtag và bấm nút ĐĂNG (Post)
+     * Bước 2: Điền Caption + Hashtag và bấm nút ĐĂNG (Post)
      */
     private fun handleStepInputCaptionAndPost(root: AccessibilityNodeInfo, session: AutoPostSession) {
         // 1. Tìm ô nhập mô tả
         val editKeywords = listOf("mô tả", "Describe", "Thêm mô tả", "Hashtag", "Viết gì đó")
         val editNode = findNodeByKeywords(root, editKeywords) ?: findNodeByClassName(root, "android.widget.EditText")
 
+        val fullText = if (session.hashtags.isNotBlank()) "${session.caption} ${session.hashtags}".trim() else session.caption.trim()
+
         if (editNode != null) {
-            val fullText = "${session.caption} ${session.hashtags}".trim()
             val arguments = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, fullText)
             }
             editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             session.onProgress("Đã nhập Caption và Hashtag thành công")
         }
 
@@ -186,25 +158,25 @@ class TikTokAutoPostService : AccessibilityService() {
 
             if (postNode != null && performClick(postNode)) {
                 session.onProgress("Đang tiến hành ĐĂNG VIDEO...")
-                currentStep = 6
+                currentStep = 3
             }
-        }, 1500)
+        }, 1200)
     }
 
     /**
-     * Bước 6: Nhận diện đăng hoàn tất và gửi tín hiệu báo cáo
+     * Bước 3: Nhận diện đăng hoàn tất và gửi tín hiệu báo cáo
      */
     private fun handleStepVerifyPostSuccess(root: AccessibilityNodeInfo, session: AutoPostSession) {
         val successKeywords = listOf("Đã đăng", "Uploaded", "Hoàn tất", "Xong", "Chia sẻ thành công")
         val successNode = findNodeByKeywords(root, successKeywords)
 
-        if (successNode != null || currentStep == 6) {
+        if (successNode != null || currentStep == 3) {
             handler.postDelayed({
                 session.onProgress("ĐÃ ĐĂNG VIDEO THÀNH CÔNG 100%!")
                 session.onCompleted(true, "Đăng video thành công hoàn toàn!")
                 activeSession = null
                 currentStep = 0
-            }, 3000)
+            }, 2500)
         }
     }
 

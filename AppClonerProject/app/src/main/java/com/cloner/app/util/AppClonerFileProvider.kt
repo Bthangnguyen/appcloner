@@ -40,7 +40,16 @@ class AppClonerFileProvider : ContentProvider() {
         return cursor
     }
 
-    override fun getType(uri: Uri): String = "application/vnd.android.package-archive"
+    override fun getType(uri: Uri): String {
+        val path = uri.path?.lowercase() ?: ""
+        return when {
+            path.endsWith(".mp4") -> "video/mp4"
+            path.endsWith(".apk") -> "application/vnd.android.package-archive"
+            path.endsWith(".png") -> "image/png"
+            path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
+            else -> "video/*"
+        }
+    }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         val file = getFileForUri(uri)
