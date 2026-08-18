@@ -42,8 +42,9 @@ object IdentityGenerator {
         GpsLocation("Sydney, Úc", -33.868820, 151.209296)
     )
 
-    // Danh sách hồ sơ thiết bị cao cấp đồng bộ hoàn chỉnh từng phần cứng, CPU, SOC, GPU, RAM
+    // Danh sách 25+ hồ sơ thiết bị đa dạng các hãng, phân khúc (Flagship, Tầm trung, Gaming)
     val DEVICE_PROFILES = listOf(
+        // --- SAMSUNG ---
         DeviceProfile(
             manufacturer = "Samsung", brand = "samsung", model = "Galaxy S24 Ultra",
             device = "e3q", board = "pineapple",
@@ -61,6 +62,14 @@ object IdentityGenerator {
             androidVersion = "14", sdkInt = 34
         ),
         DeviceProfile(
+            manufacturer = "Samsung", brand = "samsung", model = "Galaxy S22 Ultra 5G",
+            device = "b0q", board = "taro",
+            fingerprint = "samsung/b0qxxx/b0q:13/TP1A.220624.014/S908BXXU2BVKM:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 1", cpuPart = "SM8450", socPlatform = "taro",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 730", ramGb = 12,
+            androidVersion = "13", sdkInt = 33
+        ),
+        DeviceProfile(
             manufacturer = "Samsung", brand = "samsung", model = "Galaxy S21 Ultra 5G",
             device = "p3s", board = "lahaina",
             fingerprint = "samsung/p3sxxx/p3s:13/TP1A.220624.014/G998BXXU9EWK1:user/release-keys",
@@ -69,11 +78,37 @@ object IdentityGenerator {
             androidVersion = "13", sdkInt = 33
         ),
         DeviceProfile(
+            manufacturer = "Samsung", brand = "samsung", model = "Galaxy A54 5G",
+            device = "a54x", board = "s5e8835",
+            fingerprint = "samsung/a54xins/a54x:14/UP1A.231005.007/A546EXXU5BWL1:user/release-keys",
+            cpuModel = "Exynos 1380", cpuPart = "s5e8835", socPlatform = "universal1380",
+            socManufacturer = "Samsung", gpuRenderer = "Mali-G68 MP5", ramGb = 8,
+            androidVersion = "14", sdkInt = 34
+        ),
+        DeviceProfile(
+            manufacturer = "Samsung", brand = "samsung", model = "Galaxy Z Fold5",
+            device = "q5q", board = "kalama",
+            fingerprint = "samsung/q5qxxx/q5q:14/UP1A.231005.007/F946BXXU1BWKA:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 2 for Galaxy", cpuPart = "SM8550-AC", socPlatform = "kalama",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 740", ramGb = 12,
+            androidVersion = "14", sdkInt = 34
+        ),
+
+        // --- GOOGLE PIXEL ---
+        DeviceProfile(
             manufacturer = "Google", brand = "google", model = "Pixel 8 Pro",
             device = "husky", board = "zuma",
             fingerprint = "google/husky/husky:14/UD1A.230803.041/10540409:user/release-keys",
             cpuModel = "Google Tensor G3", cpuPart = "zuma", socPlatform = "zuma",
             socManufacturer = "Google", gpuRenderer = "Mali-G715 Immortalis-MC10", ramGb = 12,
+            androidVersion = "14", sdkInt = 34
+        ),
+        DeviceProfile(
+            manufacturer = "Google", brand = "google", model = "Pixel 8",
+            device = "shiba", board = "zuma",
+            fingerprint = "google/shiba/shiba:14/UD1A.230803.041/10540409:user/release-keys",
+            cpuModel = "Google Tensor G3", cpuPart = "zuma", socPlatform = "zuma",
+            socManufacturer = "Google", gpuRenderer = "Mali-G715 Immortalis-MC10", ramGb = 8,
             androidVersion = "14", sdkInt = 34
         ),
         DeviceProfile(
@@ -84,6 +119,16 @@ object IdentityGenerator {
             socManufacturer = "Google", gpuRenderer = "Mali-G710 MP7", ramGb = 12,
             androidVersion = "14", sdkInt = 34
         ),
+        DeviceProfile(
+            manufacturer = "Google", brand = "google", model = "Pixel 7a",
+            device = "lynx", board = "cloudripper",
+            fingerprint = "google/lynx/lynx:14/UD1A.230803.022/10452399:user/release-keys",
+            cpuModel = "Google Tensor G2", cpuPart = "gs201", socPlatform = "cloudripper",
+            socManufacturer = "Google", gpuRenderer = "Mali-G710 MP7", ramGb = 8,
+            androidVersion = "14", sdkInt = 34
+        ),
+
+        // --- XIAOMI & POCO & REDMI ---
         DeviceProfile(
             manufacturer = "Xiaomi", brand = "Xiaomi", model = "Xiaomi 14 Pro",
             device = "shennong", board = "pineapple",
@@ -101,11 +146,103 @@ object IdentityGenerator {
             androidVersion = "13", sdkInt = 33
         ),
         DeviceProfile(
+            manufacturer = "Xiaomi", brand = "Xiaomi", model = "Redmi Note 13 Pro+",
+            device = "zircon", board = "mt6897",
+            fingerprint = "Xiaomi/zircon_eea/zircon:14/UKQ1.231003.002/V816.0.2.0.UNOEUXM:user/release-keys",
+            cpuModel = "MediaTek Dimensity 7200 Ultra", cpuPart = "MT6897", socPlatform = "mt6897",
+            socManufacturer = "Mediatek", gpuRenderer = "Mali-G610 MC4", ramGb = 12,
+            androidVersion = "14", sdkInt = 34
+        ),
+        DeviceProfile(
+            manufacturer = "Xiaomi", brand = "POCO", model = "POCO F5 Pro",
+            device = "mondrian", board = "taro",
+            fingerprint = "POCO/mondrian_global/mondrian:13/TKQ1.221114.001/V14.0.5.0.TMNMIXM:user/release-keys",
+            cpuModel = "Snapdragon 8+ Gen 1", cpuPart = "SM8475", socPlatform = "taro",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 730", ramGb = 12,
+            androidVersion = "13", sdkInt = 33
+        ),
+
+        // --- ONEPLUS ---
+        DeviceProfile(
             manufacturer = "OnePlus", brand = "OnePlus", model = "OnePlus 12",
             device = "OP594DL1", board = "pineapple",
             fingerprint = "OnePlus/CPH2581/OP594DL1:14/UKQ1.230924.001/T.18e5b4b-1-1:user/release-keys",
             cpuModel = "Snapdragon 8 Gen 3", cpuPart = "SM8650", socPlatform = "pineapple",
             socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 750", ramGb = 16,
+            androidVersion = "14", sdkInt = 34
+        ),
+        DeviceProfile(
+            manufacturer = "OnePlus", brand = "OnePlus", model = "OnePlus 11 5G",
+            device = "OP5929L1", board = "kalama",
+            fingerprint = "OnePlus/CPH2449/OP5929L1:13/TP1A.220905.001/S.13e7b4b-1-1:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 2", cpuPart = "SM8550", socPlatform = "kalama",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 740", ramGb = 16,
+            androidVersion = "13", sdkInt = 33
+        ),
+
+        // --- OPPO ---
+        DeviceProfile(
+            manufacturer = "OPPO", brand = "OPPO", model = "OPPO Find X6 Pro",
+            device = "PGEM10", board = "kalama",
+            fingerprint = "OPPO/PGEM10/PGEM10:13/TP1A.220905.001/1684394014493:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 2", cpuPart = "SM8550", socPlatform = "kalama",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 740", ramGb = 16,
+            androidVersion = "13", sdkInt = 33
+        ),
+        DeviceProfile(
+            manufacturer = "OPPO", brand = "OPPO", model = "OPPO Reno10 Pro+ 5G",
+            device = "PHU110", board = "taro",
+            fingerprint = "OPPO/PHU110/PHU110:13/TP1A.220905.001/1685412349000:user/release-keys",
+            cpuModel = "Snapdragon 8+ Gen 1", cpuPart = "SM8475", socPlatform = "taro",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 730", ramGb = 12,
+            androidVersion = "13", sdkInt = 33
+        ),
+
+        // --- VIVO & IQOO ---
+        DeviceProfile(
+            manufacturer = "vivo", brand = "vivo", model = "vivo X100 Pro",
+            device = "V2324A", board = "mt6989",
+            fingerprint = "vivo/V2324A/V2324A:14/UP1A.231005.007/comp-011210:user/release-keys",
+            cpuModel = "MediaTek Dimensity 9300", cpuPart = "MT6989", socPlatform = "mt6989",
+            socManufacturer = "Mediatek", gpuRenderer = "Immortalis-G720 MC12", ramGb = 16,
+            androidVersion = "14", sdkInt = 34
+        ),
+        DeviceProfile(
+            manufacturer = "vivo", brand = "iQOO", model = "iQOO 12 Pro",
+            device = "V2307A", board = "pineapple",
+            fingerprint = "vivo/V2307A/V2307A:14/UP1A.231005.007/comp-110723:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 3", cpuPart = "SM8650", socPlatform = "pineapple",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 750", ramGb = 16,
+            androidVersion = "14", sdkInt = 34
+        ),
+
+        // --- REALME ---
+        DeviceProfile(
+            manufacturer = "realme", brand = "realme", model = "realme GT5 Pro",
+            device = "RMX3888", board = "pineapple",
+            fingerprint = "realme/RMX3888/RMX3888:14/UKQ1.230924.001/1701955140:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 3", cpuPart = "SM8650", socPlatform = "pineapple",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 750", ramGb = 16,
+            androidVersion = "14", sdkInt = 34
+        ),
+
+        // --- SONY ---
+        DeviceProfile(
+            manufacturer = "Sony", brand = "Sony", model = "Xperia 1 V",
+            device = "XQ-DQ72", board = "kalama",
+            fingerprint = "Sony/XQ-DQ72_EEA/XQ-DQ72:14/UKQ1.230917.001/67.1.A.2.194:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 2", cpuPart = "SM8550", socPlatform = "kalama",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 740", ramGb = 12,
+            androidVersion = "14", sdkInt = 34
+        ),
+
+        // --- ASUS ROG (GAMING) ---
+        DeviceProfile(
+            manufacturer = "Asus", brand = "asus", model = "ROG Phone 8 Pro",
+            device = "ASUS_AI2401", board = "pineapple",
+            fingerprint = "asus/WW_AI2401/ASUS_AI2401:14/UKQ1.230924.001/34.1420.1420.280:user/release-keys",
+            cpuModel = "Snapdragon 8 Gen 3", cpuPart = "SM8650", socPlatform = "pineapple",
+            socManufacturer = "Qualcomm", gpuRenderer = "Adreno (TM) 750", ramGb = 24,
             androidVersion = "14", sdkInt = 34
         )
     )
