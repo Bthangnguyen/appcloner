@@ -340,4 +340,63 @@ object GoogleDriveClient {
         conn.setRequestProperty("Authorization", "Bearer $token")
         return conn.responseCode in 200..299
     }
+
+    /**
+     * Tự động quét các bản TikTok Clone đang cài trên máy và đồng bộ lên file device_clones.json trên Drive
+     */
+    fun syncInstalledClonesToCloud(context: Context): Boolean {
+        val token = getAccessToken(context) ?: return false
+        val queueFolderId = findFolderId(context, "SubAI_Queue") ?: return false
+
+        try {
+            val pm = context.packageManager
+            val installedApps = pm.getInstalledApplications(0)
+            val clonesArray = JSONArray()
+
+            for (app in installedApps) {
+                val pkg = app.packageName
+                if (pkg.startsWith("com.ss.android.ugc.trill")) {
+                    val label = pm.getApplicationLabel(app).toString()
+                    val cloneId = if (pkg == "com.ss.android.ugc.trill") "base" else pkg.substringAfter("com.ss.android.ugc.trill.")
+                    val obj = JSONObject().apply {
+                        put("id", cloneId)
+                        put("name", label)
+                        put("package", pkg)
+                    }
+                    clonesArray.put(obj)
+                }
+            }
+
+            if (clonesArray.length() == 0) {
+                clonesArray.put(JSONObject().apply {
+                    put("id", "clone1")
+                    put("name", "TikTok Clone 1")
+                    put("package", "com.ss.android.ugc.trill.clone1")
+                })
+            }
+
+            val jsonContent = clonesArray.toString(2)
+            val boundary = "-------SubAIClonesBoundary"
+            val body = ("--$boundary\r\n" +
+                    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                    "{\"name\": \"device_clones.json\", \"parents\": [\"$queueFolderId\"]}\r\n" +
+                    "--$boundary\r\n" +
+                    "Content-Type: application/json\r\n\r\n" +
+                    jsonContent + "\r\n--$boundary--\r\n").toByteArray(Charsets.UTF_8)
+
+            val url = URL("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
+            conn.setRequestProperty("Content-Length", body.size.toString())
+            conn.doOutput = true
+            conn.outputStream.use { it.write(body) }
+
+            return conn.responseCode in 200..299
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return false
+    }
 }

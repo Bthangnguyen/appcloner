@@ -424,6 +424,7 @@ class MainActivity : Activity() {
 
         Thread {
             try {
+                GoogleDriveClient.syncInstalledClonesToCloud(this)
                 val videos = GoogleDriveClient.listQueueVideos(this)
                 runOnUiThread {
                     pbDriveSync.visibility = View.GONE
