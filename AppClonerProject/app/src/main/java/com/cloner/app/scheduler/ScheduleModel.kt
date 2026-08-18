@@ -25,10 +25,11 @@ data class ScheduleTask(
     val hashtags: String,
     val targetPackageName: String,
     val targetAppName: String,
-    val scheduledTimeMillis: Long,
+    var scheduledTimeMillis: Long,
     var status: ScheduleStatus = ScheduleStatus.PENDING,
     var progressPercent: Int = 0,
     var logMessage: String = "Đã lên lịch",
+    var retryCount: Int = 0,
     val createdAtMillis: Long = System.currentTimeMillis()
 ) {
     fun toJson(): JSONObject {
@@ -44,6 +45,7 @@ data class ScheduleTask(
         json.put("status", status.name)
         json.put("progressPercent", progressPercent)
         json.put("logMessage", logMessage)
+        json.put("retryCount", retryCount)
         json.put("createdAtMillis", createdAtMillis)
         return json
     }
@@ -59,9 +61,10 @@ data class ScheduleTask(
                 targetPackageName = json.optString("targetPackageName", "com.ss.android.ugc.trill"),
                 targetAppName = json.optString("targetAppName", "TikTok"),
                 scheduledTimeMillis = json.getLong("scheduledTimeMillis"),
-                status = try { ScheduleStatus.valueOf(json.optString("status", "PENDING")) } catch (e: Exception) { ScheduleStatus.PENDING },
+                status = ScheduleStatus.valueOf(json.optString("status", "PENDING")),
                 progressPercent = json.optInt("progressPercent", 0),
-                logMessage = json.optString("logMessage", ""),
+                logMessage = json.optString("logMessage", "Đã lên lịch"),
+                retryCount = json.optInt("retryCount", 0),
                 createdAtMillis = json.optLong("createdAtMillis", System.currentTimeMillis())
             )
         }

@@ -134,8 +134,18 @@ class TikTokPostForegroundService : Service() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi đăng video: ${e.message}", e)
-            task.status = ScheduleStatus.FAILED
-            task.logMessage = "Lỗi: ${e.message}"
+            if (task.retryCount < 5) {
+                task.retryCount++
+                task.status = ScheduleStatus.PENDING
+                task.scheduledTimeMillis = System.currentTimeMillis() + (3 * 60 * 1000) // Tự động thử lại sau 3 phút
+                task.logMessage = "Mất kết nối mạng. Sẽ tự động thử lại sau 3 phút (Lần ${task.retryCount}/5)..."
+                ScheduleStorage.updateTask(this, task)
+                ScheduleStorage.scheduleSystemAlarm(this, task)
+                updateNotification("Tạm hoãn do mất mạng", "Sẽ tự động thử lại sau 3 phút (Lần ${task.retryCount}/5)...")
+            } else {
+                task.status = ScheduleStatus.FAILED
+                task.logMessage = "Lỗi sau 5 lần thử lại: ${e.message}"
+            }
         } finally {
             // Bước 4: XÓA NGAY FILE VIDEO TRONG BỘ NHỚ ĐIỆN THOẠI ĐỂ GIẢI PHÓNG DUNG LƯỢNG
             if (tempFile != null && tempFile.exists()) {
