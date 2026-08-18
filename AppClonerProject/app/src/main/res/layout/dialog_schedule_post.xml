@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⏰ ĐẶT LỊCH ĐĂNG TIKTOK TỰ ĐỘNG"
+            android:textColor="#1565C0"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/tvDlgVideoTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Video: Title"
+            android:textColor="#424242"
+            android:textSize="13sp"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. Chọn bản TikTok Clone để đăng:"
+            android:textColor="#212121"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="14dp" />
+
+        <Spinner
+            android:id="@+id/spDlgTargetClone"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="#E3F2FD"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. Thời gian đăng video:"
+            android:textColor="#212121"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="14dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp">
+
+            <Button
+                android:id="@+id/btnDlgPickDate"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="📅 Chọn Ngày"
+                android:textSize="12sp"
+                android:background="#ECEFF1"
+                android:textColor="#37474F" />
+
+            <Button
+                android:id="@+id/btnDlgPickTime"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="⏰ Chọn Giờ"
+                android:textSize="12sp"
+                android:background="#ECEFF1"
+                android:textColor="#37474F" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvDlgSelectedTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Lịch hẹn: 18:30 hôm nay"
+            android:textColor="#E65100"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3. Nội dung Caption mô tả:"
+            android:textColor="#212121"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="14dp" />
+
+        <EditText
+            android:id="@+id/etDlgCaption"
+            android:layout_width="match_parent"
+            android:layout_height="70dp"
+            android:background="#F5F5F5"
+            android:hint="Nhập mô tả video..."
+            android:padding="8dp"
+            android:textSize="12sp"
+            android:gravity="top"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="4. Hashtags:"
+            android:textColor="#212121"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="14dp" />
+
+        <EditText
+            android:id="@+id/etDlgHashtags"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:background="#F5F5F5"
+            android:hint="#trending #xuhuong #subai"
+            android:padding="8dp"
+            android:textSize="12sp"
+            android:layout_marginTop="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="20dp">
+
+            <Button
+                android:id="@+id/btnDlgCancel"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="HỦY"
+                android:background="#EEEEEE"
+                android:textColor="#616161" />
+
+            <Button
+                android:id="@+id/btnDlgConfirmSchedule"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="2"
+                android:layout_marginStart="10dp"
+                android:text="LÊN LỊCH ĐĂNG NGAY"
+                android:textStyle="bold"
+                android:background="#1565C0"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

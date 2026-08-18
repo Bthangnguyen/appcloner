@@ -11,9 +11,9 @@
         android:layout_height="wrap_content"
         android:background="#1565C0"
         android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="14dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="12dp"
         android:paddingBottom="4dp">
 
         <LinearLayout
@@ -28,14 +28,14 @@
                 android:layout_weight="1"
                 android:text="App Cloner Studio"
                 android:textColor="#FFFFFF"
-                android:textSize="22sp"
+                android:textSize="20sp"
                 android:textStyle="bold" />
 
             <Button
                 android:id="@+id/btnViewLogs"
                 android:layout_width="wrap_content"
                 android:layout_height="32dp"
-                android:text="📋 XEM LOG"
+                android:text="📋 LOGS"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:background="#D32F2F"
@@ -44,20 +44,20 @@
                 android:paddingEnd="8dp" />
         </LinearLayout>
 
-        <!-- Thanh chuyển đổi 2 Tab -->
+        <!-- Thanh chuyển đổi 3 Tab -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:orientation="horizontal"
-            android:layout_marginTop="12dp">
+            android:layout_marginTop="10dp">
 
             <Button
                 android:id="@+id/btnTabApps"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:text="ỨNG DỤNG TRÊN MÁY"
-                android:textSize="12sp"
+                android:text="ỨNG DỤNG"
+                android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="#FFFFFF"
                 android:background="#1976D2" />
@@ -67,8 +67,18 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:text="ỨNG DỤNG ĐÃ CLONE"
-                android:textSize="12sp"
+                android:text="ĐÃ CLONE"
+                android:textSize="11sp"
+                android:textColor="#BBDEFB"
+                android:background="#0D47A1" />
+
+            <Button
+                android:id="@+id/btnTabAutoPost"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.2"
+                android:text="⏰ AUTO GDRIVE"
+                android:textSize="11sp"
                 android:textColor="#BBDEFB"
                 android:background="#0D47A1" />
         </LinearLayout>
@@ -159,12 +169,11 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- Thông báo trống khi chưa có file clone -->
         <TextView
             android:id="@+id/tvEmptyCloned"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Chưa có ứng dụng nào được clone.\n\nHãy chuyển sang tab 'ỨNG DỤNG TRÊN MÁY', chọn app bạn muốn và bấm Clone!"
+            android:text="Chưa có ứng dụng nào được clone.\n\nHãy chuyển sang tab 'ỨNG DỤNG', chọn app bạn muốn và bấm Clone!"
             android:textColor="#78909C"
             android:textSize="14sp"
             android:gravity="center"
@@ -179,6 +188,206 @@
             android:divider="#CFD8DC"
             android:dividerHeight="1dp"
             android:padding="6dp" />
+    </LinearLayout>
+
+    <!-- CONTAINER TAB 3: AUTO POST & GOOGLE DRIVE SCHEDULER -->
+    <LinearLayout
+        android:id="@+id/layoutTabAutoPost"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- Status Card Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#FFFFFF"
+            android:padding="12dp"
+            android:layout_marginBottom="6dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvDriveStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Google Drive: Chưa cấu hình"
+                    android:textColor="#C62828"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnConfigDrive"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="🔑 CẤU HÌNH GDRIVE"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:background="#1565C0"
+                    android:textColor="#FFFFFF"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
+
+                <TextView
+                    android:id="@+id/tvAccessibilityStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Trợ năng Auto-Post: Chưa bật"
+                    android:textColor="#E65100"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnEnableAccessibility"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="⚙️ BẬT TRỢ NĂNG"
+                    android:textSize="10sp"
+                    android:background="#455A64"
+                    android:textColor="#FFFFFF"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Section 1: Kho Video trên Google Drive -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="#F0F4F8">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="8dp"
+                android:background="#E1F5FE"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🎬 KHO VIDEO SUBAI (GOOGLE DRIVE)"
+                    android:textColor="#0277BD"
+                    android:textStyle="bold"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnSyncDriveVideos"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:text="🔄 ĐỒNG BỘ"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:background="#0288D1"
+                    android:textColor="#FFFFFF"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/pbDriveSync"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="16dp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvEmptyDriveVideos"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Chưa có video nào trong thư mục 'SubAI_Queue'.\n\nHãy xuất video từ SubAI trên PC và chạy script gdrive_uploader.py để đẩy lên Google Drive!"
+                android:textColor="#78909C"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:padding="20dp"
+                android:visibility="gone" />
+
+            <ListView
+                android:id="@+id/lvDriveVideos"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="#E0E0E0"
+                android:dividerHeight="1dp"
+                android:padding="4dp" />
+        </LinearLayout>
+
+        <!-- Section 2: Danh Sách Lịch Hẹn Đăng -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="8dp"
+                android:background="#FFF3E0"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvScheduleCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="⏰ LỊCH HẸN ĐĂNG TỰ ĐỘNG"
+                    android:textColor="#E65100"
+                    android:textStyle="bold"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnRefreshTasks"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:text="Làm mới"
+                    android:textSize="10sp"
+                    android:background="#FB8C00"
+                    android:textColor="#FFFFFF"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvEmptyScheduledTasks"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Chưa có lịch hẹn nào.\nBấm 'ĐẶT LỊCH' ở danh sách video bên trên để lên lịch tự động đăng!"
+                android:textColor="#9E9E9E"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:padding="24dp"
+                android:visibility="gone" />
+
+            <ListView
+                android:id="@+id/lvScheduledTasks"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="#EEEEEE"
+                android:dividerHeight="1dp"
+                android:padding="4dp" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔑 CẤU HÌNH GOOGLE DRIVE (SERVICE ACCOUNT)"
+            android:textColor="#1565C0"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Dán toàn bộ nội dung file service_account.json (tải từ Google Cloud Console) vào ô bên dưới để điện thoại có thể kết nối và tải video từ Google Drive:"
+            android:textColor="#616161"
+            android:textSize="12sp"
+            android:layout_marginTop="10dp" />
+
+        <EditText
+            android:id="@+id/etDlgServiceAccountJson"
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:background="#F5F5F5"
+            android:hint='{\n  "type": "service_account",\n  "project_id": "...",\n  "private_key": "...",\n  "client_email": "..."\n}'
+            android:textColor="#212121"
+            android:textColorHint="#9E9E9E"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:gravity="top"
+            android:padding="10dp"
+            android:layout_marginTop="10dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="16dp">
+
+            <Button
+                android:id="@+id/btnDlgCancelDrive"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="ĐÓNG"
+                android:background="#EEEEEE"
+                android:textColor="#616161" />
+
+            <Button
+                android:id="@+id/btnDlgSaveDrive"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="2"
+                android:layout_marginStart="10dp"
+                android:text="LƯU CẤU HÌNH"
+                android:textStyle="bold"
+                android:background="#2E7D32"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

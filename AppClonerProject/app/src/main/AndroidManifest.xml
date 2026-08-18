@@ -24,6 +24,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -76,6 +81,27 @@
         <receiver
             android:name=".util.InstallStatusReceiver"
             android:exported="false" />
+
+        <!-- Bộ Hẹn Giờ & Dịch Vụ Auto Post TikTok -->
+        <receiver
+            android:name=".scheduler.ScheduleAlarmReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".scheduler.TikTokPostForegroundService"
+            android:exported="false" />
+
+        <service
+            android:name=".service.TikTokAutoPostService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
     </application>
 </manifest>
