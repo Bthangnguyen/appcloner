@@ -162,6 +162,7 @@ object PineHookManager {
 
             // Hook Activity Lifecycle để vô hiệu hóa cờ anti-tamper của Device Info HW
             try {
+                patchDeviceInfoAntiTamper(context)
                 val app = context.applicationContext as? Application
                 app?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
                     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
@@ -185,6 +186,36 @@ object PineHookManager {
         }
     }
 
+    private fun patchDeviceInfoAntiTamper(context: Context) {
+        try {
+            val pm = context.packageManager
+            val pi = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+            val sig = pi.signatures?.firstOrNull() ?: return
+            val sigBytes = sig.toByteArray()
+            val md1 = java.security.MessageDigest.getInstance("MD5")
+            val md5_1 = md1.digest(sigBytes)
+            md5_1[0] = 43.toByte()
+            val md2 = java.security.MessageDigest.getInstance("MD5")
+            val md5_2 = md2.digest(md5_1)
+            val expectedInts = IntArray(md5_2.size) { i -> md5_2[i].toInt() }
+
+            val actClass = try {
+                context.classLoader.loadClass("ru.andr7e.deviceinfohw.DeviceInfoActivity")
+            } catch (e: Throwable) {
+                Class.forName("ru.andr7e.deviceinfohw.DeviceInfoActivity")
+            }
+            for (fName in arrayOf("a0", "Z", "Y")) {
+                try {
+                    val field = actClass.getDeclaredField(fName)
+                    field.isAccessible = true
+                    if (field.type == IntArray::class.java) {
+                        field.set(null, expectedInts)
+                    }
+                } catch (ignored: Throwable) {}
+            }
+        } catch (ignored: Throwable) {}
+    }
+
     private fun bypassAntiTamperInActivity(activity: Activity) {
         if (activity.javaClass.name.contains("DeviceInfoActivity")) {
             for (fieldName in arrayOf("F", "G", "U", "D", "E")) {
@@ -194,6 +225,7 @@ object PineHookManager {
                     field.setBoolean(activity, true)
                 } catch (ignored: Throwable) {}
             }
+            patchDeviceInfoAntiTamper(activity)
         }
     }
 
