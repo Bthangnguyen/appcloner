@@ -1,11 +1,13 @@
 package com.cloner.runtime
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.Signature
+import android.hardware.camera2.CameraManager
 import android.location.Location
 import android.location.LocationManager
 import android.net.wifi.WifiInfo
@@ -14,9 +16,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.IInterface
+import android.os.StatFs
 import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Base64
+import android.util.DisplayMetrics
+import android.view.Display
 import java.lang.reflect.Field
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
@@ -175,6 +180,94 @@ object PineHookManager {
         applyLocationHooks(config)
         applyProxyNetworkSettings(config)
         applyCpuHooks(config)
+        applyMemoryAndStorageHooks(context, config)
+        applyDisplayHooks(context, config)
+        applyCameraHooks(config)
+    }
+
+    @JvmStatic
+    fun overrideDisplayMetrics(m: DisplayMetrics?) {
+        if (m == null) return
+        val prof = resolveProfile(globalConfig?.fakeModel)
+        m.widthPixels = prof.screenWidth
+        m.heightPixels = prof.screenHeight
+        m.densityDpi = prof.screenDpi
+        m.density = prof.screenDpi / 160f
+        m.scaledDensity = m.density
+        m.xdpi = prof.screenDpi.toFloat()
+        m.ydpi = prof.screenDpi.toFloat()
+    }
+
+    @JvmStatic
+    fun getStorageTotalBlocks(): Long {
+        val prof = resolveProfile(globalConfig?.fakeModel)
+        return (prof.romGb.toLong() * 1024L * 1024L * 1024L) / 4096L
+    }
+
+    @JvmStatic
+    fun getStorageAvailBlocks(): Long {
+        val prof = resolveProfile(globalConfig?.fakeModel)
+        return ((prof.romGb.toLong() * 1024L * 1024L * 1024L) / 4096L) * 6 / 10
+    }
+
+    private fun applyMemoryAndStorageHooks(context: Context, config: ClonerRuntimeConfig) {
+        val prof = resolveProfile(config.fakeModel)
+        try {
+            val m1dClass = Class.forName("m1.d")
+            setStaticFinalField(m1dClass, "a", "${prof.ramGb} GB LPDDR5X")
+            setStaticFinalField(m1dClass, "b", "LPDDR5X")
+            setStaticFinalField(m1dClass, "c", prof.ramGb.toLong() * 1024L * 1024L * 1024L)
+        } catch (ignored: Throwable) {}
+
+        try {
+            hookBinderService("activity") { method, args, original ->
+                if (method.name == "getMemoryInfo" && args != null && args.isNotEmpty()) {
+                    val info = args[0] as? ActivityManager.MemoryInfo
+                    if (info != null) {
+                        info.totalMem = prof.ramGb.toLong() * 1024L * 1024L * 1024L
+                        info.availMem = (prof.ramGb.toLong() * 1024L * 1024L * 1024L) * 6 / 10
+                        info.threshold = 512L * 1024L * 1024L
+                        info.lowMemory = false
+                        return@hookBinderService null
+                    }
+                }
+                original()
+            }
+        } catch (ignored: Throwable) {}
+    }
+
+    private fun applyDisplayHooks(context: Context, config: ClonerRuntimeConfig) {
+        val prof = resolveProfile(config.fakeModel)
+        try {
+            val dm = context.resources.displayMetrics
+            overrideDisplayMetrics(dm)
+        } catch (ignored: Throwable) {}
+
+        try {
+            hookBinderService("window") { method, args, original ->
+                if (method.name.contains("DisplaySize") && args != null && args.size >= 2) {
+                    val pt = args[1] as? android.graphics.Point
+                    if (pt != null) {
+                        pt.x = prof.screenWidth
+                        pt.y = prof.screenHeight
+                        return@hookBinderService null
+                    }
+                }
+                original()
+            }
+        } catch (ignored: Throwable) {}
+    }
+
+    private fun applyCameraHooks(config: ClonerRuntimeConfig) {
+        val prof = resolveProfile(config.fakeModel)
+        try {
+            hookBinderService("media.camera") { method, args, original ->
+                if (method.name == "getNumberOfCameras") {
+                    return@hookBinderService prof.cameraCount
+                }
+                original()
+            }
+        } catch (ignored: Throwable) {}
     }
 
     private fun applyCpuHooks(config: ClonerRuntimeConfig) {
@@ -392,6 +485,28 @@ object PineHookManager {
                 } catch (ignored: Throwable) {}
             }
             patchDeviceInfoAntiTamper(activity)
+
+            val prof = resolveProfile(globalConfig?.fakeModel)
+            try {
+                val f1cClass = Class.forName("f1.c")
+                setStaticFinalField(f1cClass, "b", "${prof.ramGb} GB")
+                setStaticFinalField(f1cClass, "c", "5")
+                setStaticFinalField(f1cClass, "d", prof.ramGb)
+                setStaticFinalField(f1cClass, "e", "LPDDR5")
+                setStaticFinalField(f1cClass, "f", "LPDDR5")
+            } catch (ignored: Throwable) {}
+
+            try {
+                val m1dClass = Class.forName("m1.d")
+                setStaticFinalField(m1dClass, "a", "${prof.ramGb} GB LPDDR5")
+                setStaticFinalField(m1dClass, "b", "LPDDR5")
+                setStaticFinalField(m1dClass, "c", prof.ramGb.toLong() * 1024L * 1024L * 1024L)
+            } catch (ignored: Throwable) {}
+
+            try {
+                val dm = activity.resources.displayMetrics
+                overrideDisplayMetrics(dm)
+            } catch (ignored: Throwable) {}
         }
     }
 
