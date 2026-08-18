@@ -39,6 +39,7 @@ object PineHookManager {
         if (isInitialized) return
         isInitialized = true
 
+        unsealHiddenApi()
         applyDeviceBuildHooks(config)
         applySystemPropertiesHooks(config)
         applySignatureVerificationBypass(context, config)
@@ -50,6 +51,19 @@ object PineHookManager {
         applyWifiHooks(config)
         applyLocationHooks(config)
         applyProxyNetworkSettings(config)
+    }
+
+    private fun unsealHiddenApi() {
+        try {
+            val classArrayType = Class.forName("[Ljava.lang.Class;")
+            val forNameMethod = Class::class.java.getDeclaredMethod("forName", String::class.java)
+            val getDeclaredMethodMethod = Class::class.java.getDeclaredMethod("getDeclaredMethod", String::class.java, classArrayType)
+            val vmRuntimeClass = forNameMethod.invoke(null, "dalvik.system.VMRuntime") as Class<*>
+            val getRuntimeMethod = getDeclaredMethodMethod.invoke(vmRuntimeClass, "getRuntime", null) as Method
+            val setHiddenApiExemptionsMethod = getDeclaredMethodMethod.invoke(vmRuntimeClass, "setHiddenApiExemptions", arrayOf(Array<String>::class.java)) as Method
+            val vmRuntime = getRuntimeMethod.invoke(null)
+            setHiddenApiExemptionsMethod.invoke(vmRuntime, arrayOf("L"))
+        } catch (ignored: Throwable) {}
     }
 
     /**

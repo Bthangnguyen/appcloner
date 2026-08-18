@@ -197,7 +197,17 @@ class ClonePipeline(private val config: CloneConfig) {
                         // Bỏ qua
                     }
 
-                    // Sao chép các tệp khác (DEX, Resources, Assets, Libs)
+                    // Xử lý các file classes.dex: Tự động vô hiệu hóa cơ chế anti-tamper (Anti-Signature Check / Exit call)
+                    entryName.endsWith(".dex") -> {
+                        val rawDex = baseZip.getInputStream(entry).use { it.readBytes() }
+                        val patchedDex = patchDexAntiTamper(rawDex)
+                        val newEntry = ZipEntry(entryName)
+                        zipOut.putNextEntry(newEntry)
+                        zipOut.write(patchedDex)
+                        zipOut.closeEntry()
+                    }
+
+                    // Sao chép các tệp khác (Resources, Assets, Libs)
                     else -> {
                         val newEntry = ZipEntry(entryName)
                         if (entry.method == ZipEntry.STORED) {
@@ -429,5 +439,81 @@ class ClonePipeline(private val config: CloneConfig) {
             t.printStackTrace()
         }
         return null
+    }
+
+    private fun patchDexAntiTamper(dexBytes: ByteArray): ByteArray {
+        var modified = false
+        val dex = dexBytes.clone()
+
+        // 1. Vô hiệu hóa Thread.start() của luồng kiểm tra chữ ký DeviceInfoActivity$e
+        val threadStartPat = byteArrayOf(
+            0x70.toByte(), 0x20.toByte(), 0x90.toByte(), 0x56.toByte(), 0x06.toByte(), 0x00.toByte(),
+            0x6e.toByte(), 0x10.toByte(), 0xa3.toByte(), 0x56.toByte(), 0x06.toByte(), 0x00.toByte()
+        )
+        val threadStartRepl = byteArrayOf(
+            0x70.toByte(), 0x20.toByte(), 0x90.toByte(), 0x56.toByte(), 0x06.toByte(), 0x00.toByte(),
+            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte()
+        )
+        if (replaceBytesInArray(dex, threadStartPat, threadStartRepl)) {
+            modified = true
+        }
+
+        // 2. Vô hiệu hóa các lệnh finish() trong DeviceInfoActivity$e
+        val finishPat1 = byteArrayOf(
+            0x54.toByte(), 0xa8.toByte(), 0xda.toByte(), 0x28.toByte(), 0x6e.toByte(),
+            0x10.toByte(), 0xa3.toByte(), 0x0d.toByte(), 0x08.toByte(), 0x00.toByte()
+        )
+        val finishPat2 = byteArrayOf(
+            0x54.toByte(), 0xa0.toByte(), 0xda.toByte(), 0x28.toByte(), 0x6e.toByte(),
+            0x10.toByte(), 0xa3.toByte(), 0x0d.toByte(), 0x00.toByte(), 0x00.toByte()
+        )
+        val nop10 = ByteArray(10) { 0 }
+
+        if (replaceBytesInArray(dex, finishPat1, nop10)) {
+            modified = true
+        }
+        if (replaceBytesInArray(dex, finishPat2, nop10)) {
+            modified = true
+        }
+
+        if (modified) {
+            // Cập nhật lại SHA-1 (bytes 12-31) và Adler32 (bytes 8-11)
+            val md = java.security.MessageDigest.getInstance("SHA-1")
+            md.update(dex, 32, dex.size - 32)
+            val sha1 = md.digest()
+            System.arraycopy(sha1, 0, dex, 12, 20)
+
+            val adler = java.util.zip.Adler32()
+            adler.update(dex, 12, dex.size - 12)
+            val checksum = adler.value.toInt()
+            dex[8] = (checksum and 0xFF).toByte()
+            dex[9] = ((checksum shr 8) and 0xFF).toByte()
+            dex[10] = ((checksum shr 16) and 0xFF).toByte()
+            dex[11] = ((checksum shr 24) and 0xFF).toByte()
+        }
+
+        return dex
+    }
+
+    private fun replaceBytesInArray(source: ByteArray, pattern: ByteArray, replacement: ByteArray): Boolean {
+        var replaced = false
+        var i = 0
+        while (i <= source.size - pattern.size) {
+            var match = true
+            for (j in pattern.indices) {
+                if (source[i + j] != pattern[j]) {
+                    match = false
+                    break
+                }
+            }
+            if (match) {
+                System.arraycopy(replacement, 0, source, i, replacement.size)
+                replaced = true
+                i += pattern.size
+            } else {
+                i++
+            }
+        }
+        return replaced
     }
 }
