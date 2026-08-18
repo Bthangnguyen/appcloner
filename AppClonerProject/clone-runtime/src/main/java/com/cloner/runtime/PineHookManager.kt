@@ -72,26 +72,45 @@ object PineHookManager {
         }
     }
 
+    private fun resolveProfile(model: String?): IdentityGenerator.DeviceProfile {
+        val defaultProfile = IdentityGenerator.DEVICE_PROFILES[0]
+        if (model.isNullOrEmpty()) return defaultProfile
+        return IdentityGenerator.DEVICE_PROFILES.firstOrNull {
+            model.contains(it.model, ignoreCase = true) ||
+            it.model.contains(model, ignoreCase = true) ||
+            model.contains(it.device, ignoreCase = true)
+        } ?: when {
+            model.contains("S23", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[1]
+            model.contains("S21", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[2]
+            model.contains("Pixel 8", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[3]
+            model.contains("Pixel 7", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[4]
+            model.contains("Xiaomi 14", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[5]
+            model.contains("Xiaomi 13", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[6]
+            model.contains("OnePlus", ignoreCase = true) -> IdentityGenerator.DEVICE_PROFILES[7]
+            else -> defaultProfile
+        }
+    }
+
     @JvmStatic
     fun getSystemProperty(key: String, originalValue: String? = null): String? {
         systemPropMap[key]?.let { return it }
         val conf = globalConfig ?: return originalValue
-        val isS24 = conf.fakeModel?.contains("S24", ignoreCase = true) == true
+        val prof = resolveProfile(conf.fakeModel)
         return when (key) {
-            "ro.product.model", "ro.product.vendor.model", "ro.product.odm.model" -> if (isS24) "SM-S928B" else (conf.fakeModel ?: originalValue)
-            "ro.product.manufacturer", "ro.product.vendor.manufacturer", "ro.product.odm.manufacturer" -> conf.fakeManufacturer ?: "Samsung"
-            "ro.product.brand", "ro.product.vendor.brand", "ro.product.odm.brand" -> conf.fakeManufacturer?.lowercase() ?: "samsung"
-            "ro.product.name", "ro.product.vendor.name" -> if (isS24) "e3qxxx" else (conf.fakeModel?.lowercase() ?: originalValue)
-            "ro.product.device", "ro.product.vendor.device" -> if (isS24) "e3q" else (conf.fakeModel?.lowercase() ?: originalValue)
-            "ro.product.board", "ro.board.platform" -> if (isS24) "pineapple" else "kona"
-            "ro.soc.model" -> if (isS24) "SM8650" else "SM8250"
-            "ro.soc.manufacturer" -> "Qualcomm"
-            "ro.hardware", "ro.hardware.chipname" -> if (isS24) "qcom" else "qcom"
-            "ro.build.fingerprint", "ro.vendor.build.fingerprint", "ro.bootimage.build.fingerprint" -> conf.fakeFingerprint ?: originalValue
+            "ro.product.model", "ro.product.vendor.model", "ro.product.odm.model" -> prof.model
+            "ro.product.manufacturer", "ro.product.vendor.manufacturer", "ro.product.odm.manufacturer" -> prof.manufacturer
+            "ro.product.brand", "ro.product.vendor.brand", "ro.product.odm.brand" -> prof.brand
+            "ro.product.name", "ro.product.vendor.name" -> "${prof.device}xxx"
+            "ro.product.device", "ro.product.vendor.device" -> prof.device
+            "ro.product.board", "ro.board.platform" -> prof.socPlatform
+            "ro.soc.model" -> prof.cpuPart
+            "ro.soc.manufacturer" -> prof.socManufacturer
+            "ro.hardware", "ro.hardware.chipname" -> if (prof.socManufacturer == "Qualcomm") "qcom" else prof.socPlatform
+            "ro.build.fingerprint", "ro.vendor.build.fingerprint", "ro.bootimage.build.fingerprint" -> conf.fakeFingerprint ?: prof.fingerprint
             "ro.serialno", "ro.boot.serialno" -> conf.fakeAndroidId?.take(16)?.uppercase() ?: originalValue
-            "ro.config.marketing_name", "ro.semc.product.name" -> conf.fakeModel ?: "Galaxy S24 Ultra"
-            "ro.build.version.release" -> if (isS24) "14" else "13"
-            "ro.build.version.sdk" -> if (isS24) "34" else "33"
+            "ro.config.marketing_name", "ro.semc.product.name" -> prof.model
+            "ro.build.version.release" -> prof.androidVersion
+            "ro.build.version.sdk" -> prof.sdkInt.toString()
             else -> originalValue
         }
     }
@@ -100,10 +119,9 @@ object PineHookManager {
     fun readFile(path: String?): String? {
         if (path == null) return null
         val conf = globalConfig
-        val isS24 = conf?.fakeModel?.contains("S24", ignoreCase = true) == true
+        val prof = resolveProfile(conf?.fakeModel)
 
         if (path == "/proc/cpuinfo") {
-            val chipName = if (isS24) "SM8650" else "SM8250"
             val sb = StringBuilder()
             for (i in 0 until 8) {
                 sb.append("processor\t: $i\n")
@@ -115,12 +133,12 @@ object PineHookManager {
                 sb.append("CPU part\t: 0x805\n")
                 sb.append("CPU revision\t: 0\n\n")
             }
-            sb.append("Hardware\t: Qualcomm Technologies, Inc $chipName\n")
+            sb.append("Hardware\t: ${prof.socManufacturer} Technologies, Inc ${prof.cpuPart}\n")
             return sb.toString()
         }
 
         if (path == "/proc/meminfo") {
-            val memKb = if (isS24) 11845120 else 7752448
+            val memKb = prof.ramGb * 1024 * 1024 - 500000
             return "MemTotal:       $memKb kB\nMemFree:         4123560 kB\nMemAvailable:    6894320 kB\n"
         }
 
@@ -160,25 +178,23 @@ object PineHookManager {
     }
 
     private fun applyCpuHooks(config: ClonerRuntimeConfig) {
-        val isS24 = config.fakeModel?.contains("S24", ignoreCase = true) == true
-        if (isS24) {
-            try {
-                val f1nClass = Class.forName("f1.n")
-                setStaticFinalField(f1nClass, "a", "Snapdragon 8 Gen 3")
-                setStaticFinalField(f1nClass, "b", "Snapdragon 8 Gen 3")
-            } catch (ignored: Throwable) {}
+        val prof = resolveProfile(config.fakeModel)
+        try {
+            val f1nClass = Class.forName("f1.n")
+            setStaticFinalField(f1nClass, "a", prof.cpuModel)
+            setStaticFinalField(f1nClass, "b", prof.cpuModel)
+        } catch (ignored: Throwable) {}
 
-            try {
-                val f1lClass = Class.forName("f1.l")
-                setStaticFinalField(f1lClass, "c", "Snapdragon 8 Gen 3")
-            } catch (ignored: Throwable) {}
+        try {
+            val f1lClass = Class.forName("f1.l")
+            setStaticFinalField(f1lClass, "c", prof.cpuModel)
+        } catch (ignored: Throwable) {}
 
-            try {
-                val b1SClass = Class.forName("b1.S")
-                setStaticFinalField(b1SClass, "f", "Galaxy S24 Ultra")
-                setStaticFinalField(b1SClass, "j", "pineapple")
-            } catch (ignored: Throwable) {}
-        }
+        try {
+            val b1SClass = Class.forName("b1.S")
+            setStaticFinalField(b1SClass, "f", prof.model)
+            setStaticFinalField(b1SClass, "j", prof.socPlatform)
+        } catch (ignored: Throwable) {}
     }
 
     private fun unsealHiddenApi() {
