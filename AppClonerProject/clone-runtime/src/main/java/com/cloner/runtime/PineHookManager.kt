@@ -76,15 +76,58 @@ object PineHookManager {
     fun getSystemProperty(key: String, originalValue: String? = null): String? {
         systemPropMap[key]?.let { return it }
         val conf = globalConfig ?: return originalValue
+        val isS24 = conf.fakeModel?.contains("S24", ignoreCase = true) == true
         return when (key) {
-            "ro.product.model", "ro.product.vendor.model", "ro.product.odm.model" -> conf.fakeModel ?: originalValue
-            "ro.product.manufacturer", "ro.product.vendor.manufacturer", "ro.product.odm.manufacturer" -> conf.fakeManufacturer ?: originalValue
-            "ro.product.brand", "ro.product.vendor.brand", "ro.product.odm.brand" -> conf.fakeManufacturer?.lowercase() ?: originalValue
-            "ro.product.name", "ro.product.device", "ro.product.vendor.name", "ro.product.vendor.device" -> conf.fakeModel?.lowercase() ?: originalValue
+            "ro.product.model", "ro.product.vendor.model", "ro.product.odm.model" -> if (isS24) "SM-S928B" else (conf.fakeModel ?: originalValue)
+            "ro.product.manufacturer", "ro.product.vendor.manufacturer", "ro.product.odm.manufacturer" -> conf.fakeManufacturer ?: "Samsung"
+            "ro.product.brand", "ro.product.vendor.brand", "ro.product.odm.brand" -> conf.fakeManufacturer?.lowercase() ?: "samsung"
+            "ro.product.name", "ro.product.vendor.name" -> if (isS24) "e3qxxx" else (conf.fakeModel?.lowercase() ?: originalValue)
+            "ro.product.device", "ro.product.vendor.device" -> if (isS24) "e3q" else (conf.fakeModel?.lowercase() ?: originalValue)
+            "ro.product.board", "ro.board.platform" -> if (isS24) "pineapple" else "kona"
+            "ro.soc.model" -> if (isS24) "SM8650" else "SM8250"
+            "ro.soc.manufacturer" -> "Qualcomm"
+            "ro.hardware", "ro.hardware.chipname" -> if (isS24) "qcom" else "qcom"
             "ro.build.fingerprint", "ro.vendor.build.fingerprint", "ro.bootimage.build.fingerprint" -> conf.fakeFingerprint ?: originalValue
             "ro.serialno", "ro.boot.serialno" -> conf.fakeAndroidId?.take(16)?.uppercase() ?: originalValue
-            "ro.config.marketing_name", "ro.semc.product.name" -> conf.fakeModel ?: originalValue
+            "ro.config.marketing_name", "ro.semc.product.name" -> conf.fakeModel ?: "Galaxy S24 Ultra"
+            "ro.build.version.release" -> if (isS24) "14" else "13"
+            "ro.build.version.sdk" -> if (isS24) "34" else "33"
             else -> originalValue
+        }
+    }
+
+    @JvmStatic
+    fun readFile(path: String?): String? {
+        if (path == null) return null
+        val conf = globalConfig
+        val isS24 = conf?.fakeModel?.contains("S24", ignoreCase = true) == true
+
+        if (path == "/proc/cpuinfo") {
+            val chipName = if (isS24) "SM8650" else "SM8250"
+            val sb = StringBuilder()
+            for (i in 0 until 8) {
+                sb.append("processor\t: $i\n")
+                sb.append("BogoMIPS\t: 38.40\n")
+                sb.append("Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp\n")
+                sb.append("CPU implementer\t: 0x51\n")
+                sb.append("CPU architecture: 8\n")
+                sb.append("CPU variant\t: 0x2\n")
+                sb.append("CPU part\t: 0x805\n")
+                sb.append("CPU revision\t: 0\n\n")
+            }
+            sb.append("Hardware\t: Qualcomm Technologies, Inc $chipName\n")
+            return sb.toString()
+        }
+
+        if (path == "/proc/meminfo") {
+            val memKb = if (isS24) 11845120 else 7752448
+            return "MemTotal:       $memKb kB\nMemFree:         4123560 kB\nMemAvailable:    6894320 kB\n"
+        }
+
+        return try {
+            java.io.File(path).readText()
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -113,6 +156,29 @@ object PineHookManager {
         applyWifiHooks(config)
         applyLocationHooks(config)
         applyProxyNetworkSettings(config)
+        applyCpuHooks(config)
+    }
+
+    private fun applyCpuHooks(config: ClonerRuntimeConfig) {
+        val isS24 = config.fakeModel?.contains("S24", ignoreCase = true) == true
+        if (isS24) {
+            try {
+                val f1nClass = Class.forName("f1.n")
+                setStaticFinalField(f1nClass, "a", "Snapdragon 8 Gen 3")
+                setStaticFinalField(f1nClass, "b", "Snapdragon 8 Gen 3")
+            } catch (ignored: Throwable) {}
+
+            try {
+                val f1lClass = Class.forName("f1.l")
+                setStaticFinalField(f1lClass, "c", "Snapdragon 8 Gen 3")
+            } catch (ignored: Throwable) {}
+
+            try {
+                val b1SClass = Class.forName("b1.S")
+                setStaticFinalField(b1SClass, "f", "Galaxy S24 Ultra")
+                setStaticFinalField(b1SClass, "j", "pineapple")
+            } catch (ignored: Throwable) {}
+        }
     }
 
     private fun unsealHiddenApi() {
