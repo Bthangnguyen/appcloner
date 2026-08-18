@@ -183,6 +183,26 @@ object PineHookManager {
         applyMemoryAndStorageHooks(context, config)
         applyDisplayHooks(context, config)
         applyCameraHooks(config)
+
+        try {
+            val app = if (context is Application) context else context.applicationContext as? Application
+            val prof = resolveProfile(config.fakeModel)
+            app?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+                    syncDeviceMemoryInfo(prof)
+                }
+                override fun onActivityStarted(activity: Activity) {
+                    syncDeviceMemoryInfo(prof)
+                }
+                override fun onActivityResumed(activity: Activity) {
+                    syncDeviceMemoryInfo(prof)
+                }
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivityStopped(activity: Activity) {}
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {}
+            })
+        } catch (ignored: Throwable) {}
     }
 
     @JvmStatic
@@ -210,13 +230,95 @@ object PineHookManager {
         return ((prof.romGb.toLong() * 1024L * 1024L * 1024L) / 4096L) * 6 / 10
     }
 
-    private fun applyMemoryAndStorageHooks(context: Context, config: ClonerRuntimeConfig) {
-        val prof = resolveProfile(config.fakeModel)
+    private fun syncDeviceMemoryInfo(prof: IdentityGenerator.DeviceProfile) {
+        val ramMb = prof.ramGb.toLong() * 1024L
+        val totalBytes = ramMb * 1024L * 1024L
+        val halfBytes = totalBytes / 2
+
+        try {
+            val v0r0Class = Class.forName("V0.R0")
+            setStaticFinalField(v0r0Class, "v0", ramMb)
+        } catch (ignored: Throwable) {}
+
+        try {
+            val f1cClass = Class.forName("f1.c")
+            setStaticFinalField(f1cClass, "b", "${prof.ramGb} GB")
+            setStaticFinalField(f1cClass, "c", "5X")
+            setStaticFinalField(f1cClass, "d", prof.ramGb)
+            setStaticFinalField(f1cClass, "e", "LPDDR5X")
+            setStaticFinalField(f1cClass, "f", "LPDDR5X")
+        } catch (ignored: Throwable) {}
+
         try {
             val m1dClass = Class.forName("m1.d")
             setStaticFinalField(m1dClass, "a", "${prof.ramGb} GB LPDDR5X")
             setStaticFinalField(m1dClass, "b", "LPDDR5X")
-            setStaticFinalField(m1dClass, "c", prof.ramGb.toLong() * 1024L * 1024L * 1024L)
+            setStaticFinalField(m1dClass, "c", totalBytes)
+        } catch (ignored: Throwable) {}
+
+        try {
+            val b1yClass = Class.forName("b1.y")
+            setStaticFinalField(b1yClass, "a", totalBytes)
+        } catch (ignored: Throwable) {}
+
+        try {
+            val b1zClass = Class.forName("b1.z")
+            setStaticFinalField(b1zClass, "d", ramMb)
+            setStaticFinalField(b1zClass, "e", ramMb)
+            setStaticFinalField(b1zClass, "f", ramMb)
+            setStaticFinalField(b1zClass, "m", halfBytes)
+            setStaticFinalField(b1zClass, "n", halfBytes)
+            setStaticFinalField(b1zClass, "q", halfBytes)
+            setStaticFinalField(b1zClass, "r", halfBytes)
+            setStaticFinalField(b1zClass, "a", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "b", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "c", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "g", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "h", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "k", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "l", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "o", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "p", "${prof.ramGb} GB")
+            setStaticFinalField(b1zClass, "t", "LPDDR5X")
+        } catch (ignored: Throwable) {}
+    }
+
+    private fun applyMemoryAndStorageHooks(context: Context, config: ClonerRuntimeConfig) {
+        val prof = resolveProfile(config.fakeModel)
+        syncDeviceMemoryInfo(prof)
+
+        // Can thiệp trực tiếp ActivityManager.IActivityManagerSingleton
+        try {
+            val amClass = Class.forName("android.app.ActivityManager")
+            val singletonField = amClass.getDeclaredField("IActivityManagerSingleton")
+            singletonField.isAccessible = true
+            val singleton = singletonField.get(null)
+            if (singleton != null) {
+                val singletonClass = Class.forName("android.util.Singleton")
+                val mInstanceField = singletonClass.getDeclaredField("mInstance")
+                mInstanceField.isAccessible = true
+                val origIAM = mInstanceField.get(singleton) as? IInterface
+                if (origIAM != null) {
+                    val iamClass = Class.forName("android.app.IActivityManager")
+                    val proxyIAM = Proxy.newProxyInstance(
+                        iamClass.classLoader,
+                        arrayOf(iamClass)
+                    ) { _, method, args ->
+                        if (method.name == "getMemoryInfo" && args != null && args.isNotEmpty()) {
+                            val info = args[0] as? ActivityManager.MemoryInfo
+                            if (info != null) {
+                                info.totalMem = prof.ramGb.toLong() * 1024L * 1024L * 1024L
+                                info.availMem = (prof.ramGb.toLong() * 1024L * 1024L * 1024L) * 6 / 10
+                                info.threshold = 512L * 1024L * 1024L
+                                info.lowMemory = false
+                                return@newProxyInstance null
+                            }
+                        }
+                        method.invoke(origIAM, *(args ?: emptyArray()))
+                    }
+                    mInstanceField.set(singleton, proxyIAM)
+                }
+            }
         } catch (ignored: Throwable) {}
 
         try {
@@ -487,21 +589,7 @@ object PineHookManager {
             patchDeviceInfoAntiTamper(activity)
 
             val prof = resolveProfile(globalConfig?.fakeModel)
-            try {
-                val f1cClass = Class.forName("f1.c")
-                setStaticFinalField(f1cClass, "b", "${prof.ramGb} GB")
-                setStaticFinalField(f1cClass, "c", "5")
-                setStaticFinalField(f1cClass, "d", prof.ramGb)
-                setStaticFinalField(f1cClass, "e", "LPDDR5")
-                setStaticFinalField(f1cClass, "f", "LPDDR5")
-            } catch (ignored: Throwable) {}
-
-            try {
-                val m1dClass = Class.forName("m1.d")
-                setStaticFinalField(m1dClass, "a", "${prof.ramGb} GB LPDDR5")
-                setStaticFinalField(m1dClass, "b", "LPDDR5")
-                setStaticFinalField(m1dClass, "c", prof.ramGb.toLong() * 1024L * 1024L * 1024L)
-            } catch (ignored: Throwable) {}
+            syncDeviceMemoryInfo(prof)
 
             try {
                 val dm = activity.resources.displayMetrics
