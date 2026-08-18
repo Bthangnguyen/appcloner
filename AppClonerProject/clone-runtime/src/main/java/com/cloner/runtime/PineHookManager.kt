@@ -34,10 +34,72 @@ import javax.net.ssl.*
 object PineHookManager {
 
     private var isInitialized = false
+    private var globalConfig: ClonerRuntimeConfig? = null
+    private val systemPropMap = mutableMapOf<String, String>()
+
+    @JvmStatic
+    fun initFromContext(context: Context) {
+        if (isInitialized) return
+        try {
+            val jsonStr = context.assets.open("cloner_runtime_config.json").bufferedReader().use { it.readText() }
+            val json = org.json.JSONObject(jsonStr)
+            val config = ClonerRuntimeConfig(
+                originalPackageName = json.optString("originalPackageName"),
+                newPackageName = json.optString("newPackageName"),
+                cloneNumber = json.optInt("cloneNumber", 1),
+                originalApplicationClass = json.optString("originalApplicationClass").takeIf { it.isNotEmpty() },
+                originalSignatureBase64 = json.optString("originalSignatureBase64").takeIf { it.isNotEmpty() },
+                fakeAndroidId = json.optString("fakeAndroidId").takeIf { it.isNotEmpty() },
+                fakeImei = json.optString("fakeImei").takeIf { it.isNotEmpty() },
+                fakeMacAddress = json.optString("fakeMacAddress").takeIf { it.isNotEmpty() },
+                fakeLatitude = if (json.has("fakeLatitude")) json.optDouble("fakeLatitude") else null,
+                fakeLongitude = if (json.has("fakeLongitude")) json.optDouble("fakeLongitude") else null,
+                hideRoot = json.optBoolean("hideRoot", true),
+                fakeModel = json.optString("fakeModel").takeIf { it.isNotEmpty() },
+                fakeManufacturer = json.optString("fakeManufacturer").takeIf { it.isNotEmpty() },
+                fakeFingerprint = json.optString("fakeFingerprint").takeIf { it.isNotEmpty() },
+                fakeDrmId = json.optString("fakeDrmId").takeIf { it.isNotEmpty() },
+                fakeImsi = json.optString("fakeImsi").takeIf { it.isNotEmpty() },
+                proxyHost = json.optString("proxyHost").takeIf { it.isNotEmpty() },
+                proxyPort = if (json.has("proxyPort")) json.optInt("proxyPort") else null,
+                proxyType = json.optString("proxyType", "HTTP"),
+                unpinSsl = json.optBoolean("unpinSsl", true)
+            )
+            globalConfig = config
+            initHooks(context, config)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    @JvmStatic
+    fun getSystemProperty(key: String, originalValue: String? = null): String? {
+        systemPropMap[key]?.let { return it }
+        val conf = globalConfig ?: return originalValue
+        return when (key) {
+            "ro.product.model", "ro.product.vendor.model", "ro.product.odm.model" -> conf.fakeModel ?: originalValue
+            "ro.product.manufacturer", "ro.product.vendor.manufacturer", "ro.product.odm.manufacturer" -> conf.fakeManufacturer ?: originalValue
+            "ro.product.brand", "ro.product.vendor.brand", "ro.product.odm.brand" -> conf.fakeManufacturer?.lowercase() ?: originalValue
+            "ro.product.name", "ro.product.device", "ro.product.vendor.name", "ro.product.vendor.device" -> conf.fakeModel?.lowercase() ?: originalValue
+            "ro.build.fingerprint", "ro.vendor.build.fingerprint", "ro.bootimage.build.fingerprint" -> conf.fakeFingerprint ?: originalValue
+            "ro.serialno", "ro.boot.serialno" -> conf.fakeAndroidId?.take(16)?.uppercase() ?: originalValue
+            "ro.config.marketing_name", "ro.semc.product.name" -> conf.fakeModel ?: originalValue
+            else -> originalValue
+        }
+    }
+
+    @JvmStatic
+    fun getAndroidId(resolver: Any?, name: String?, defaultValue: String? = null): String? {
+        if (name == "android_id") {
+            globalConfig?.fakeAndroidId?.let { return it }
+        }
+        return defaultValue ?: globalConfig?.fakeAndroidId ?: "8a3b5c7d9e1f2a3b"
+    }
 
     fun initHooks(context: Context, config: ClonerRuntimeConfig) {
         if (isInitialized) return
         isInitialized = true
+        globalConfig = config
 
         unsealHiddenApi()
         applyDeviceBuildHooks(config)
@@ -74,12 +136,18 @@ object PineHookManager {
             setStaticFinalField(Build::class.java, "MODEL", it)
             setStaticFinalField(Build::class.java, "PRODUCT", it.lowercase())
             setStaticFinalField(Build::class.java, "DEVICE", it.lowercase())
+            setStaticFinalField(Build::class.java, "BOARD", it.lowercase())
+            setStaticFinalField(Build::class.java, "HARDWARE", "qcom")
         }
         config.fakeManufacturer?.let {
             setStaticFinalField(Build::class.java, "MANUFACTURER", it)
             setStaticFinalField(Build::class.java, "BRAND", it.lowercase())
         }
-        config.fakeFingerprint?.let { setStaticFinalField(Build::class.java, "FINGERPRINT", it) }
+        config.fakeFingerprint?.let {
+            setStaticFinalField(Build::class.java, "FINGERPRINT", it)
+            setStaticFinalField(Build::class.java, "ID", "UP1A.231005.007")
+            setStaticFinalField(Build::class.java, "DISPLAY", "UP1A.231005.007.S928BXXU1AXB5")
+        }
         config.fakeAndroidId?.let {
             try {
                 setStaticFinalField(Build::class.java, "SERIAL", it.take(16).uppercase())
@@ -91,26 +159,28 @@ object PineHookManager {
      * 2. Can thiệp SystemProperties (ro.product.model, ro.product.brand, ro.build.fingerprint...)
      */
     private fun applySystemPropertiesHooks(config: ClonerRuntimeConfig) {
-        try {
-            val sysPropClass = Class.forName("android.os.SystemProperties")
-            val propMap = mutableMapOf<String, String>()
-            config.fakeModel?.let {
-                propMap["ro.product.model"] = it
-                propMap["ro.product.device"] = it.lowercase()
-                propMap["ro.product.name"] = it.lowercase()
-            }
-            config.fakeManufacturer?.let {
-                propMap["ro.product.manufacturer"] = it
-                propMap["ro.product.brand"] = it.lowercase()
-            }
-            config.fakeFingerprint?.let {
-                propMap["ro.build.fingerprint"] = it
-            }
-            config.fakeAndroidId?.let {
-                propMap["ro.serialno"] = it.take(16).uppercase()
-                propMap["ro.boot.serialno"] = it.take(16).uppercase()
-            }
-        } catch (ignored: Exception) {}
+        config.fakeModel?.let {
+            systemPropMap["ro.product.model"] = it
+            systemPropMap["ro.product.device"] = it.lowercase()
+            systemPropMap["ro.product.name"] = it.lowercase()
+            systemPropMap["ro.product.vendor.model"] = it
+            systemPropMap["ro.config.marketing_name"] = it
+            systemPropMap["ro.semc.product.name"] = it
+        }
+        config.fakeManufacturer?.let {
+            systemPropMap["ro.product.manufacturer"] = it
+            systemPropMap["ro.product.brand"] = it.lowercase()
+            systemPropMap["ro.product.vendor.manufacturer"] = it
+            systemPropMap["ro.product.vendor.brand"] = it.lowercase()
+        }
+        config.fakeFingerprint?.let {
+            systemPropMap["ro.build.fingerprint"] = it
+            systemPropMap["ro.vendor.build.fingerprint"] = it
+        }
+        config.fakeAndroidId?.let {
+            systemPropMap["ro.serialno"] = it.take(16).uppercase()
+            systemPropMap["ro.boot.serialno"] = it.take(16).uppercase()
+        }
     }
 
 
