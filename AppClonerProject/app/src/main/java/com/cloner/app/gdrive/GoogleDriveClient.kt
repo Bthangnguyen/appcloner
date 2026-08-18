@@ -211,7 +211,7 @@ object GoogleDriveClient {
 
         val list = mutableListOf<DriveVideoItem>()
         val query = URLEncoder.encode("'$queueFolderId' in parents and trashed = false", "UTF-8")
-        val url = URL("$DRIVE_API_BASE/files?q=$query&fields=files(id,name,size,description,modifiedTime,mimeType)&pageSize=50")
+        val url = URL("$DRIVE_API_BASE/files?q=$query&fields=files(id,name,size,description,modifiedTime,mimeType)&orderBy=modifiedTime%20desc&pageSize=50")
 
         val conn = url.openConnection() as HttpURLConnection
         conn.setRequestProperty("Authorization", "Bearer $token")
@@ -231,7 +231,7 @@ object GoogleDriveClient {
                         try {
                             val metaObj = JSONObject(jsonContent)
                             val vName = metaObj.optString("video_file_name")
-                            if (vName.isNotEmpty()) {
+                            if (vName.isNotEmpty() && !jsonMetadataMap.containsKey(vName)) {
                                 jsonMetadataMap[vName] = metaObj
                             }
                         } catch (ignored: Exception) {}
@@ -270,7 +270,7 @@ object GoogleDriveClient {
                 )
             }
         }
-        return list
+        return list.distinctBy { it.fileName }
     }
 
     private fun downloadTextContent(token: String, fileId: String): String? {
