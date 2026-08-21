@@ -34,12 +34,25 @@ object ScheduleStorage {
     }
 
     @Synchronized
-    fun addTask(context: Context, task: ScheduleTask) {
+    fun addTask(context: Context, task: ScheduleTask): Boolean {
         getTasks(context)
+        val activeStatuses = setOf(
+            ScheduleStatus.PENDING,
+            ScheduleStatus.DOWNLOADING,
+            ScheduleStatus.POSTING,
+            ScheduleStatus.VERIFYING,
+            ScheduleStatus.ACK_PENDING
+        )
+        if (cachedTasks.any { it.driveFileId == task.driveFileId && it.status in activeStatuses }) {
+            return false
+        }
+        if (!scheduleSystemAlarm(context, task)) {
+            return false
+        }
         cachedTasks.removeAll { it.id == task.id }
         cachedTasks.add(task)
         saveTasksToDisk(context)
-        scheduleSystemAlarm(context, task)
+        return true
     }
 
     @Synchronized
@@ -61,6 +74,22 @@ object ScheduleStorage {
             cachedTasks.removeAll { it.id == taskId }
             saveTasksToDisk(context)
         }
+    }
+
+    @Synchronized
+    fun reschedulePendingAlarms(context: Context) {
+        getTasks(context).forEach { task ->
+            if (task.status == ScheduleStatus.PENDING || task.status == ScheduleStatus.ACK_PENDING) {
+                scheduleSystemAlarm(context, task)
+            }
+        }
+    }
+
+    fun canScheduleExactAlarms(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            ?: return false
+        return alarmManager.canScheduleExactAlarms()
     }
 
     private fun loadTasksFromDisk(context: Context) {
@@ -92,12 +121,18 @@ object ScheduleStorage {
     /**
      * Đăng ký Báo thức Chuẩn xác tuyệt đối (Exact Alarm) qua AlarmManager
      */
-    fun scheduleSystemAlarm(context: Context, task: ScheduleTask) {
-        if (task.status != ScheduleStatus.PENDING || task.scheduledTimeMillis <= System.currentTimeMillis()) {
-            return
+    fun scheduleSystemAlarm(context: Context, task: ScheduleTask): Boolean {
+        if (task.status != ScheduleStatus.PENDING && task.status != ScheduleStatus.ACK_PENDING) {
+            return false
+        }
+        if (task.scheduledTimeMillis <= System.currentTimeMillis()) {
+            return false
         }
 
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+            return false
+        }
         val intent = Intent(context, ScheduleAlarmReceiver::class.java).apply {
             action = "com.cloner.app.ACTION_EXECUTE_SCHEDULE"
             putExtra("EXTRA_TASK_ID", task.id)
@@ -110,10 +145,15 @@ object ScheduleStorage {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, task.scheduledTimeMillis, pendingIntent)
-        } else {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, task.scheduledTimeMillis, pendingIntent)
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, task.scheduledTimeMillis, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, task.scheduledTimeMillis, pendingIntent)
+            }
+            true
+        } catch (_: SecurityException) {
+            false
         }
     }
 

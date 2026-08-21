@@ -3,6 +3,7 @@ package com.cloner.app.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
@@ -13,9 +14,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
-/**
- * Phiên làm việc tự động đăng video TikTok
- */
+/** Phiên làm việc tự động đăng video TikTok. */
 data class AutoPostSession(
     val taskId: String,
     val targetPackageName: String,
@@ -26,17 +25,18 @@ data class AutoPostSession(
 )
 
 /**
- * TikTokAutoPostService: Dịch vụ Tiếp Cận (Accessibility Service) tự động hóa 100%:
- * - Tự động phát hiện màn hình Chỉnh sửa / Đăng bài qua Share Intent (ACTION_SEND)
- * - Tự động tìm ô mô tả (hỗ trợ mọi loại Custom MentionEditText, HashTagEditText)
- * - Tự động điền Caption & Hashtags qua ACTION_SET_TEXT, ACTION_PASTE và Clipboard
- * - Tự động tìm và bấm nút [Tiếp] / [Đăng] qua cả Accessibility Action & Gesture Tap
- * - Tự động phát hiện hoàn tất và dọn dẹp bộ nhớ
+ * Accessibility bridge cho TikTok clone.
+ *
+ * Click nút Đăng chỉ chuyển sang VERIFYING. Chỉ khi cây UI xuất hiện tín hiệu
+ * thành công rõ ràng mới gọi onCompleted(true).
  */
 class TikTokAutoPostService : AccessibilityService() {
 
     companion object {
         private const val TAG = "TikTokAutoPost"
+        private const val SESSION_TIMEOUT_MS = 120_000L
+        private const val POST_CONFIRM_TIMEOUT_MS = 90_000L
+
         var instance: TikTokAutoPostService? = null
             private set
 
@@ -44,44 +44,60 @@ class TikTokAutoPostService : AccessibilityService() {
         private val handler = Handler(Looper.getMainLooper())
         private var isProcessing = false
         private var textFilled = false
+        private var nextClickScheduled = false
+        private var postClickScheduled = false
         private var postClicked = false
+        private var completionSent = false
         private var startTimeMillis = 0L
+        private var postClickTimeMillis = 0L
 
         fun isServiceRunning(): Boolean = instance != null
 
-        fun startPostSession(session: AutoPostSession) {
+        fun startPostSession(session: AutoPostSession): Boolean {
+            val service = instance
+            if (service == null) {
+                session.onCompleted(false, "AccessibilityService chưa được bật trên điện thoại")
+                return false
+            }
+            if (activeSession != null) {
+                session.onCompleted(false, "Đang có một phiên TikTok khác chạy; không chạy trùng")
+                return false
+            }
+
             activeSession = session
-            isProcessing = false
+            isProcessing = true
             textFilled = false
+            nextClickScheduled = false
+            postClickScheduled = false
             postClicked = false
+            completionSent = false
             startTimeMillis = System.currentTimeMillis()
+            postClickTimeMillis = 0L
 
-            session.onProgress("Đã kích hoạt dịch vụ Trợ năng tự động...")
-            Log.d(TAG, "Bắt đầu phiên AutoPost cho package: ${session.targetPackageName}")
-
-            // Bắt đầu vòng lặp quét tích cực (Active Polling Loop) mỗi 500ms
-            instance?.startWatchdogLoop()
+            session.onProgress("Đã kích hoạt AccessibilityService; đang chờ màn hình TikTok...")
+            Log.d(TAG, "Bắt đầu AutoPost cho package=${session.targetPackageName}")
+            service.startWatchdogLoop()
+            return true
         }
 
-        fun cancelCurrentSession() {
-            activeSession?.onCompleted?.invoke(false, "Đã hủy phiên làm việc")
+        fun cancelCurrentSession(message: String = "Đã hủy phiên làm việc") {
+            instance?.finishSession(false, message)
+                ?: activeSession?.onCompleted?.invoke(false, message)
             activeSession = null
             isProcessing = false
-            textFilled = false
-            postClicked = false
         }
     }
 
     private val watchdogRunnable = object : Runnable {
         override fun run() {
             val session = activeSession ?: return
-            val elapsed = System.currentTimeMillis() - startTimeMillis
-
-            // Hết thời gian chờ (60 giây)
-            if (elapsed > 60000) {
-                session.onProgress("Hết thời gian chờ phản hồi từ TikTok.")
-                session.onCompleted(false, "Quá thời gian xử lý tự động")
-                activeSession = null
+            val now = System.currentTimeMillis()
+            if (now - startTimeMillis > SESSION_TIMEOUT_MS) {
+                finishSession(false, "Không nhận được màn hình TikTok hợp lệ trong 120 giây")
+                return
+            }
+            if (postClicked && now - postClickTimeMillis > POST_CONFIRM_TIMEOUT_MS) {
+                finishSession(false, "TikTok không trả về tín hiệu xác nhận đăng trong 90 giây")
                 return
             }
 
@@ -91,9 +107,7 @@ class TikTokAutoPostService : AccessibilityService() {
                 Log.e(TAG, "Lỗi quét màn hình: ${e.message}", e)
             }
 
-            if (activeSession != null) {
-                handler.postDelayed(this, 500)
-            }
+            if (activeSession != null) handler.postDelayed(this, 500)
         }
     }
 
@@ -105,8 +119,6 @@ class TikTokAutoPostService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        Log.d(TAG, "TikTokAutoPostService đã được kết nối và sẵn sàng!")
-
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPES_ALL_MASK
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
@@ -116,16 +128,22 @@ class TikTokAutoPostService : AccessibilityService() {
             notificationTimeout = 50
         }
         serviceInfo = info
+        Log.d(TAG, "AccessibilityService đã kết nối")
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        instance = null
         handler.removeCallbacks(watchdogRunnable)
+        if (activeSession != null && !completionSent) {
+            finishSession(false, "AccessibilityService đã bị dừng")
+        }
+        activeSession = null
+        isProcessing = false
+        instance = null
+        super.onDestroy()
     }
 
     override fun onInterrupt() {
-        Log.w(TAG, "Dịch vụ trợ năng bị gián đoạn")
+        Log.w(TAG, "AccessibilityService bị gián đoạn")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -137,227 +155,234 @@ class TikTokAutoPostService : AccessibilityService() {
         }
     }
 
-    /**
-     * Phân tích cây View trên màn hình hiện tại và thực hiện hành động tương ứng
-     */
     @Synchronized
     private fun inspectAndProcessScreen(session: AutoPostSession) {
         val rootNode = rootInActiveWindow ?: return
-        val pkg = rootNode.packageName?.toString() ?: ""
+        val pkg = rootNode.packageName?.toString().orEmpty()
+        if (pkg != session.targetPackageName) return
 
-        // Kiểm tra xem có đang ở trong app TikTok clone mục tiêu không
-        if (pkg.isNotEmpty() && !pkg.startsWith("com.ss.android.ugc.trill") && !pkg.contains("tiktok") && !pkg.contains(session.targetPackageName)) {
+        if (postClicked) {
+            inspectPostResult(rootNode, session)
             return
         }
 
-        val fullText = if (session.hashtags.isNotBlank()) "${session.caption} ${session.hashtags}".trim() else session.caption.trim()
-
-        // 1. Kiểm tra màn hình ĐĂNG BÀI (Màn hình cuối cùng có ô mô tả và nút Đăng)
         val editNode = findCaptionEditNode(rootNode)
         val postNode = findPostButtonNode(rootNode)
-
-        if (editNode != null || postNode != null) {
-            // Đang ở màn hình Đăng bài!
-            if (!textFilled && editNode != null) {
-                fillCaptionText(editNode, fullText, session)
+        if (editNode != null && postNode != null) {
+            if (!textFilled) {
+                if (!fillCaptionText(editNode, buildFullText(session), session)) return
             }
-
-            if (postNode != null && (!textFilled || System.currentTimeMillis() - startTimeMillis > 1500)) {
-                if (!postClicked) {
-                    clickPostButton(postNode, session)
-                }
-            }
+            if (!postClickScheduled) clickPostButton(postNode, session)
             return
         }
 
-        // 2. Kiểm tra màn hình Chỉnh sửa video (Có nút Tiếp / Next)
         val nextNode = findNextButtonNode(rootNode)
-        if (nextNode != null) {
-            session.onProgress("Đang bấm nút [Tiếp tục] để vào trang Đăng...")
-            performSmartClick(nextNode)
-            return
+        if (nextNode != null && !nextClickScheduled) {
+            nextClickScheduled = true
+            session.onProgress("Đang bấm [Tiếp] để vào màn hình Đăng...")
+            handler.postDelayed({
+                val clicked = performSmartClick(nextNode)
+                nextClickScheduled = false
+                if (!clicked) session.onProgress("Chưa bấm được [Tiếp], sẽ thử lại")
+            }, 300)
         }
     }
 
-    /**
-     * Tự động điền Caption và Hashtags vào ô mô tả
-     */
-    private fun fillCaptionText(editNode: AccessibilityNodeInfo, text: String, session: AutoPostSession) {
-        try {
-            // Focus và Click vào ô soạn thảo
+    private fun buildFullText(session: AutoPostSession): String {
+        return if (session.hashtags.isNotBlank()) {
+            "${session.caption.trim()}\n\n${session.hashtags.trim()}".trim()
+        } else {
+            session.caption.trim()
+        }
+    }
+
+    private fun fillCaptionText(
+        editNode: AccessibilityNodeInfo,
+        text: String,
+        session: AutoPostSession
+    ): Boolean {
+        if (text.isBlank()) {
+            textFilled = true
+            return true
+        }
+        return try {
             editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             performSmartClick(editNode)
-
-            // Gán nội dung qua ACTION_SET_TEXT
             val arguments = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
             val setResult = editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            var entered = setResult
 
-            // Thử dán thêm qua ACTION_PASTE nếu set text chưa đầy đủ
-            editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            if (!entered) {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                clipboard?.setPrimaryClip(ClipData.newPlainText("TikTok Caption", text))
+                entered = editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            }
 
-            textFilled = true
-            session.onProgress("Đã tự động điền Mô tả & Hashtags thành công!")
-            Log.d(TAG, "Đã điền text thành công (result=$setResult): $text")
+            if (entered) {
+                textFilled = true
+                session.onProgress("Đã điền caption và hashtag; đang chờ nút Đăng...")
+            }
+            entered
         } catch (e: Exception) {
-            Log.e(TAG, "Lỗi điền text: ${e.message}", e)
+            Log.e(TAG, "Lỗi điền caption: ${e.message}", e)
+            false
         }
     }
 
-    /**
-     * Tự động bấm nút ĐĂNG (Post)
-     */
     private fun clickPostButton(postNode: AccessibilityNodeInfo, session: AutoPostSession) {
-        postClicked = true
-        session.onProgress("Đang bấm nút [ĐĂNG BÀI]...")
-        Log.d(TAG, "Thực hiện bấm nút Đăng bài...")
-
+        postClickScheduled = true
         handler.postDelayed({
             val clicked = performSmartClick(postNode)
-            Log.d(TAG, "Kết quả bấm nút Đăng: $clicked")
-            session.onProgress("ĐÃ BẤM ĐĂNG VIDEO THÀNH CÔNG 100%!")
-
-            // Chờ 3 giây để TikTok nạp video lên máy chủ rồi báo hoàn thành
-            handler.postDelayed({
-                session.onProgress("ĐÃ ĐĂNG BÀI HOÀN TẤT & ĐÃ GIẢI PHÓNG DUNG LƯỢNG!")
-                session.onCompleted(true, "Đăng video thành công hoàn toàn!")
-                activeSession = null
-                handler.removeCallbacks(watchdogRunnable)
-            }, 3000)
+            postClickScheduled = false
+            if (!clicked) {
+                finishSession(false, "Không bấm được nút Đăng")
+                return@postDelayed
+            }
+            postClicked = true
+            postClickTimeMillis = System.currentTimeMillis()
+            session.onProgress("Đã gửi thao tác Đăng; đang chờ TikTok xác nhận...")
         }, 800)
     }
 
-    // =========================================================================
-    // CÁC HÀM TÌM KIẾM NODE THÔNG MINH (ROBUST NODE DETECTORS)
-    // =========================================================================
+    private fun inspectPostResult(root: AccessibilityNodeInfo, session: AutoPostSession) {
+        val visibleText = collectVisibleText(root).lowercase()
+        val failureMarkers = listOf(
+            "không thể đăng", "đăng thất bại", "upload failed", "post failed",
+            "try again", "thử lại", "lỗi tải lên", "failed to publish"
+        )
+        if (failureMarkers.any { visibleText.contains(it) }) {
+            finishSession(false, "TikTok báo đăng thất bại hoặc yêu cầu thử lại")
+            return
+        }
 
-    /**
-     * Tìm ô nhập Caption mô tả (hỗ trợ mọi loại EditText, MentionEditText, RichText...)
-     */
+        val successMarkers = listOf(
+            "đã đăng", "đăng thành công", "video đã được đăng", "đã chia sẻ",
+            "posted", "published", "your video is live", "video is live"
+        )
+        if (successMarkers.any { visibleText.contains(it) }) {
+            session.onProgress("TikTok đã hiển thị tín hiệu xác nhận đăng thành công")
+            finishSession(true, "TikTok đã xác nhận đăng video")
+        }
+    }
+
+    private fun collectVisibleText(root: AccessibilityNodeInfo): String {
+        val parts = mutableListOf<String>()
+        for (node in collectNodes(root) { true }) {
+            node.text?.toString()?.takeIf { it.isNotBlank() }?.let(parts::add)
+            node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let(parts::add)
+        }
+        return parts.joinToString(" ")
+    }
+
+    private fun finishSession(success: Boolean, message: String) {
+        if (completionSent) return
+        completionSent = true
+        val session = activeSession ?: return
+        activeSession = null
+        isProcessing = false
+        textFilled = false
+        nextClickScheduled = false
+        postClickScheduled = false
+        postClicked = false
+        handler.removeCallbacks(watchdogRunnable)
+        session.onCompleted(success, message)
+    }
+
     private fun findCaptionEditNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val candidates = collectNodes(root) { node ->
-            val className = node.className?.toString() ?: ""
-            val resId = node.viewIdResourceName?.lowercase() ?: ""
-            val hint = node.hintText?.toString()?.lowercase() ?: ""
-            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-
-            node.isEditable ||
-                    className.contains("EditText", ignoreCase = true) ||
-                    resId.contains("desc") ||
-                    resId.contains("caption") ||
-                    resId.contains("title_edit") ||
-                    resId.contains("text_desc") ||
-                    hint.contains("mô tả") ||
-                    hint.contains("describe") ||
-                    hint.contains("hashtag") ||
-                    desc.contains("mô tả") ||
-                    desc.contains("describe")
+            val className = node.className?.toString().orEmpty()
+            val resId = node.viewIdResourceName?.lowercase().orEmpty()
+            val hint = node.hintText?.toString()?.lowercase().orEmpty()
+            val desc = node.contentDescription?.toString()?.lowercase().orEmpty()
+            val excluded = listOf("search", "comment", "login", "password", "phone").any {
+                resId.contains(it) || hint.contains(it) || desc.contains(it)
+            }
+            !excluded && (node.isEditable || className.contains("edittext", ignoreCase = true) ||
+                    resId.contains("caption") || resId.contains("desc") ||
+                    hint.contains("mô tả") || hint.contains("describe"))
         }
-
-        return candidates.firstOrNull { it.isVisibleToUser } ?: candidates.firstOrNull()
+        return candidates.maxByOrNull { node ->
+            val resId = node.viewIdResourceName?.lowercase().orEmpty()
+            val hint = node.hintText?.toString()?.lowercase().orEmpty()
+            (if (node.isVisibleToUser) 10 else 0) +
+                    (if (node.isEditable) 30 else 0) +
+                    (if (resId.contains("caption") || resId.contains("desc")) 100 else 0) +
+                    (if (hint.contains("mô tả") || hint.contains("describe")) 80 else 0)
+        }
     }
 
-    /**
-     * Tìm nút Tiếp (Next) trong màn hình chỉnh sửa
-     */
     private fun findNextButtonNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val nextKeywords = listOf("tiếp", "next", "tiếp tục", "xong", "done")
+        val keywords = listOf("tiếp", "next", "tiếp tục", "xong", "done")
         val candidates = collectNodes(root) { node ->
-            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
-            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-            val resId = node.viewIdResourceName?.lowercase() ?: ""
-
-            (nextKeywords.any { text == it || text.startsWith(it) } ||
-                    nextKeywords.any { desc == it || desc.startsWith(it) } ||
-                    resId.contains("btn_next") ||
-                    resId.contains("next_btn") ||
-                    resId.contains("tv_next")) &&
-                    !text.contains("đăng") && !text.contains("post")
+            val text = node.text?.toString()?.trim()?.lowercase().orEmpty()
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase().orEmpty()
+            val resId = node.viewIdResourceName?.lowercase().orEmpty()
+            val loginLike = text.contains("đăng nhập") || text.contains("login")
+            !loginLike && (keywords.any { text == it || text.startsWith("$it ") } ||
+                    keywords.any { desc == it || desc.startsWith("$it ") } ||
+                    resId.contains("btn_next") || resId.contains("next_btn") ||
+                    resId.contains("tv_next"))
         }
-
         return candidates.firstOrNull { it.isVisibleToUser } ?: candidates.firstOrNull()
     }
 
-    /**
-     * Tìm nút Đăng (Post / Publish)
-     */
     private fun findPostButtonNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val postKeywords = listOf("đăng", "post", "publish", "đăng video", "đăng ngay", "chia sẻ", "đăng lên")
+        val keywords = listOf("đăng", "post", "publish", "đăng video", "đăng ngay", "share video")
         val candidates = collectNodes(root) { node ->
-            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
-            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-            val resId = node.viewIdResourceName?.lowercase() ?: ""
-
-            (postKeywords.any { text == it || text.startsWith(it) } ||
-                    postKeywords.any { desc == it || desc.startsWith(it) } ||
-                    resId.contains("btn_post") ||
-                    resId.contains("post_btn") ||
-                    resId.contains("publish_btn") ||
-                    resId.contains("tv_publish") ||
-                    resId.contains("post_view")) &&
-                    !text.contains("bản nháp") && !text.contains("draft")
+            val text = node.text?.toString()?.trim()?.lowercase().orEmpty()
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase().orEmpty()
+            val resId = node.viewIdResourceName?.lowercase().orEmpty()
+            val excluded = listOf("đăng nhập", "login", "bản nháp", "draft", "lưu").any {
+                text.contains(it) || desc.contains(it)
+            }
+            !excluded && (keywords.any { text == it || text.startsWith("$it ") } ||
+                    keywords.any { desc == it || desc.startsWith("$it ") } ||
+                    resId.contains("btn_post") || resId.contains("post_btn") ||
+                    resId.contains("publish_btn") || resId.contains("tv_publish") ||
+                    resId.contains("post_view"))
         }
-
-        return candidates.firstOrNull { it.isVisibleToUser } ?: candidates.firstOrNull()
+        return candidates.maxByOrNull { node ->
+            val resId = node.viewIdResourceName?.lowercase().orEmpty()
+            val text = node.text?.toString()?.trim()?.lowercase().orEmpty()
+            (if (node.isVisibleToUser) 10 else 0) +
+                    (if (resId.contains("post") || resId.contains("publish")) 100 else 0) +
+                    (if (text == "đăng" || text == "post" || text == "publish") 80 else 0)
+        }
     }
 
-    /**
-     * Thu thập danh sách nodes thỏa mãn điều kiện
-     */
-    private fun collectNodes(root: AccessibilityNodeInfo, predicate: (AccessibilityNodeInfo) -> Boolean): List<AccessibilityNodeInfo> {
+    private fun collectNodes(
+        root: AccessibilityNodeInfo,
+        predicate: (AccessibilityNodeInfo) -> Boolean
+    ): List<AccessibilityNodeInfo> {
         val result = mutableListOf<AccessibilityNodeInfo>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            if (predicate(node)) {
-                result.add(node)
-            }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
+            if (predicate(node)) result.add(node)
+            for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
         }
         return result
     }
 
-    /**
-     * Thực hiện Click thông minh: Thử ACTION_CLICK trên node/parent -> Nếu không được, dùng Gesture Tap tọa độ
-     */
     private fun performSmartClick(node: AccessibilityNodeInfo): Boolean {
-        // 1. Thử click action chuẩn
         var target: AccessibilityNodeInfo? = node
-        while (target != null && !target.isClickable) {
-            target = target.parent
-        }
+        while (target != null && !target.isClickable) target = target.parent
+        if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
+        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
 
-        if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-
-        // 2. Thử click trực tiếp trên node
-        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-
-        // 3. Dự phòng Gesture Tap tại tọa độ trung tâm của Node (Android 7.0+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             val bounds = Rect()
             node.getBoundsInScreen(bounds)
             if (bounds.width() > 0 && bounds.height() > 0) {
-                val cx = bounds.centerX().toFloat()
-                val cy = bounds.centerY().toFloat()
-                return dispatchTapGesture(cx, cy)
+                return dispatchTapGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat())
             }
         }
-
         return false
     }
 
-    /**
-     * Bắn Gesture Tap chính xác vào tọa độ màn hình
-     */
     private fun dispatchTapGesture(x: Float, y: Float): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
         val path = Path().apply { moveTo(x, y) }

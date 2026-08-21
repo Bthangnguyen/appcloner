@@ -80,6 +80,13 @@ class MainActivity : Activity() {
     private lateinit var lvScheduledTasks: ListView
     private lateinit var driveVideoAdapter: DriveVideoAdapter
     private lateinit var scheduleTaskAdapter: ScheduleTaskAdapter
+    private var driveConfigDialog: AlertDialog? = null
+    private var driveConfigEditText: EditText? = null
+
+    companion object {
+        private const val REQUEST_IMPORT_DRIVE_CONFIG = 4101
+        private const val MAX_DRIVE_CONFIG_BYTES = 512 * 1024
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +105,7 @@ class MainActivity : Activity() {
         super.onResume()
         loadClonedApps()
         updateTab3Status()
+        ScheduleStorage.reschedulePendingAlarms(this)
         loadScheduledTasks()
     }
 
@@ -393,11 +401,11 @@ class MainActivity : Activity() {
 
     private fun updateTab3Status() {
         if (GoogleDriveClient.hasCredentials(this)) {
-            tvDriveStatus.text = "Google Drive: ✅ Đã kết nối Service Account"
+            tvDriveStatus.text = "Google Drive: ✅ Đã cấu hình"
             tvDriveStatus.setTextColor(0xFF2E7D32.toInt())
             btnConfigDrive.text = "🔑 ĐỔI CẤU HÌNH"
         } else {
-            tvDriveStatus.text = "Google Drive: ⚠️ Chưa cấu hình JSON"
+            tvDriveStatus.text = "Google Drive: ⚠️ Chưa cấu hình OAuth/Service Account"
             tvDriveStatus.setTextColor(0xFFC62828.toInt())
             btnConfigDrive.text = "🔑 CẤU HÌNH GDRIVE"
         }
@@ -424,7 +432,7 @@ class MainActivity : Activity() {
 
         Thread {
             try {
-                GoogleDriveClient.syncInstalledClonesToCloud(this)
+                val clonesSynced = GoogleDriveClient.syncInstalledClonesToCloud(this)
                 val videos = GoogleDriveClient.listQueueVideos(this)
                 runOnUiThread {
                     pbDriveSync.visibility = View.GONE
@@ -435,7 +443,8 @@ class MainActivity : Activity() {
                         tvEmptyDriveVideos.visibility = View.GONE
                         lvDriveVideos.visibility = View.VISIBLE
                         driveVideoAdapter.submitList(videos)
-                        Toast.makeText(this, "Đã đồng bộ ${videos.size} video từ Google Drive!", Toast.LENGTH_SHORT).show()
+                        val suffix = if (clonesSynced) "" else " (chưa cập nhật danh sách clone trên Drive)"
+                        Toast.makeText(this, "Đã đồng bộ ${videos.size} video từ Google Drive$suffix", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
@@ -464,8 +473,11 @@ class MainActivity : Activity() {
     private fun showGDriveConfigDialog() {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_gdrive_config, null)
         val etJson = dialogView.findViewById<EditText>(R.id.etDlgServiceAccountJson)
+        val btnImport = dialogView.findViewById<Button>(R.id.btnDlgImportDrive)
         val btnCancel = dialogView.findViewById<Button>(R.id.btnDlgCancelDrive)
         val btnSave = dialogView.findViewById<Button>(R.id.btnDlgSaveDrive)
+
+        driveConfigEditText = etJson
 
         val currentJson = GoogleDriveClient.getServiceAccountJson(this)
         if (!currentJson.isNullOrEmpty()) {
@@ -475,15 +487,28 @@ class MainActivity : Activity() {
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
+        driveConfigDialog = dialog
+
+        btnImport.setOnClickListener {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                // Một số DocumentsUI/Samsung không gán MIME application/json cho .json.
+                // App vẫn parse và kiểm tra credential trước khi chấp nhận file.
+                type = "*/*"
+            }, REQUEST_IMPORT_DRIVE_CONFIG)
+        }
 
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnSave.setOnClickListener {
             val jsonStr = etJson.text.toString().trim()
-            if (jsonStr.isEmpty() || !jsonStr.contains("private_key") || !jsonStr.contains("client_email")) {
-                Toast.makeText(this, "Nội dung JSON Service Account không hợp lệ!", Toast.LENGTH_SHORT).show()
+            if (jsonStr.isEmpty() || !GoogleDriveClient.isValidCredentialJson(jsonStr)) {
+                Toast.makeText(this, "JSON OAuth hoặc Service Account không hợp lệ!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            GoogleDriveClient.saveServiceAccountJson(this, jsonStr)
+            if (!GoogleDriveClient.saveServiceAccountJson(this, jsonStr)) {
+                Toast.makeText(this, "Không thể lưu credential an toàn trên thiết bị.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
             Toast.makeText(this, "Đã lưu cấu hình Google Drive thành công!", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
             updateTab3Status()
@@ -491,6 +516,31 @@ class MainActivity : Activity() {
         }
 
         dialog.show()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_IMPORT_DRIVE_CONFIG || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        try {
+            val size = contentResolver.openAssetFileDescriptor(uri, "r")?.length ?: -1L
+            if (size > MAX_DRIVE_CONFIG_BYTES) {
+                Toast.makeText(this, "File credential quá lớn (tối đa 512 KB).", Toast.LENGTH_LONG).show()
+                return
+            }
+            val text = contentResolver.openInputStream(uri)?.use { input ->
+                input.bufferedReader(Charsets.UTF_8).readText()
+            }.orEmpty()
+            if (!GoogleDriveClient.isValidCredentialJson(text)) {
+                Toast.makeText(this, "File không phải credential OAuth/Service Account hợp lệ.", Toast.LENGTH_LONG).show()
+                return
+            }
+            driveConfigEditText?.setText(text)
+            Toast.makeText(this, "Đã nạp file JSON; bấm LƯU CẤU HÌNH để mã hóa trên máy.", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Không đọc được file JSON: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showScheduleDialog(video: DriveVideoItem) {
@@ -521,15 +571,36 @@ class MainActivity : Activity() {
                 "$label (${it.packageName})"
             }
         } else {
-            listOf("TikTok Clone 1 (com.ss.android.ugc.trill.clone1)", "TikTok Clone 2 (com.ss.android.ugc.trill.clone2)", "TikTok Gốc (com.ss.android.ugc.trill)")
+            listOf("Không tìm thấy TikTok clone đã cài")
         }
 
         val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, cloneOptions)
         spTarget.adapter = spinnerAdapter
+        val preferredIndex = cloneOptions.indexOfFirst {
+            it.contains("${video.targetClone})") || it.contains(".${video.targetClone}")
+        }
+        if (preferredIndex >= 0) spTarget.setSelection(preferredIndex)
 
         // Chọn ngày giờ
         val calendar = Calendar.getInstance()
         calendar.add(Calendar.MINUTE, 5) // Mặc định 5 phút sau
+
+        // Dùng giờ gợi ý từ metadata PC nếu có; người dùng vẫn có thể chỉnh lại.
+        val suggestedParts = video.suggestedTime.trim().split(":")
+        if (suggestedParts.size == 2) {
+            val suggestedHour = suggestedParts[0].toIntOrNull()
+            val suggestedMinute = suggestedParts[1].toIntOrNull()
+            if (suggestedHour != null && suggestedMinute != null &&
+                suggestedHour in 0..23 && suggestedMinute in 0..59) {
+                calendar.set(Calendar.HOUR_OF_DAY, suggestedHour)
+                calendar.set(Calendar.MINUTE, suggestedMinute)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                if (calendar.timeInMillis <= System.currentTimeMillis()) {
+                    calendar.add(Calendar.DAY_OF_MONTH, 1)
+                }
+            }
+        }
 
         val dateFormat = SimpleDateFormat("HH:mm - dd/MM/yyyy", Locale.getDefault())
         tvSelectedTime.text = "Lịch hẹn: " + dateFormat.format(calendar.time)
@@ -558,17 +629,35 @@ class MainActivity : Activity() {
 
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnConfirm.setOnClickListener {
-            val selectedOption = spTarget.selectedItem?.toString() ?: "com.ss.android.ugc.trill.clone1"
-            val targetPkg = if (selectedOption.contains("(") && selectedOption.contains(")")) {
-                selectedOption.substringAfter("(").substringBefore(")")
+            val selectedOption = spTarget.selectedItem?.toString().orEmpty()
+            val openParen = selectedOption.lastIndexOf('(')
+            val closeParen = selectedOption.lastIndexOf(')')
+            val targetPkg = if (openParen >= 0 && closeParen > openParen) {
+                selectedOption.substring(openParen + 1, closeParen).trim()
             } else {
-                "com.ss.android.ugc.trill.clone1"
+                ""
             }
-            val targetName = selectedOption.substringBefore(" (")
+            if (targetPkg.isBlank() || !targetPkg.startsWith("com.ss.android.ugc.trill")) {
+                Toast.makeText(this, "Chưa có TikTok clone hợp lệ trên điện thoại!", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val targetName = selectedOption.substring(0, openParen).trim()
 
             val scheduledTime = calendar.timeInMillis
             if (scheduledTime <= System.currentTimeMillis()) {
                 Toast.makeText(this, "Thời gian hẹn phải ở trong tương lai!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (!ScheduleStorage.canScheduleExactAlarms(this)) {
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+                Toast.makeText(this, "Hãy cấp quyền 'Báo thức và lời nhắc', rồi bấm lên lịch lại.", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
 
@@ -580,10 +669,14 @@ class MainActivity : Activity() {
                 hashtags = etHashtags.text.toString().trim(),
                 targetPackageName = targetPkg,
                 targetAppName = targetName,
+                metadataFileId = video.metadataFileId,
                 scheduledTimeMillis = scheduledTime
             )
 
-            ScheduleStorage.addTask(this, task)
+            if (!ScheduleStorage.addTask(this, task)) {
+                Toast.makeText(this, "Video này đã có lịch đang chờ hoặc chưa cấp quyền báo thức.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
             Toast.makeText(this, "Đã lên lịch đăng lúc ${dateFormat.format(calendar.time)}!", Toast.LENGTH_LONG).show()
             dialog.dismiss()
             loadScheduledTasks()
@@ -669,6 +762,24 @@ class MainActivity : Activity() {
                     tvIcon.text = "🚀"
                     tvStatus.text = "Trạng thái: ${item.logMessage}"
                     tvStatus.setTextColor(0xFF0288D1.toInt())
+                    btnCancel.visibility = View.GONE
+                }
+                ScheduleStatus.VERIFYING -> {
+                    tvIcon.text = "🔎"
+                    tvStatus.text = "Trạng thái: ${item.logMessage}"
+                    tvStatus.setTextColor(0xFF6A1B9A.toInt())
+                    btnCancel.visibility = View.GONE
+                }
+                ScheduleStatus.REQUIRES_REVIEW -> {
+                    tvIcon.text = "⚠️"
+                    tvStatus.text = "Cần kiểm tra: ${item.logMessage}"
+                    tvStatus.setTextColor(0xFFE65100.toInt())
+                    btnCancel.visibility = View.VISIBLE
+                }
+                ScheduleStatus.ACK_PENDING -> {
+                    tvIcon.text = "☁️"
+                    tvStatus.text = "Đã xác nhận đăng; đang đồng bộ trạng thái Drive..."
+                    tvStatus.setTextColor(0xFF1565C0.toInt())
                     btnCancel.visibility = View.GONE
                 }
                 ScheduleStatus.COMPLETED -> {

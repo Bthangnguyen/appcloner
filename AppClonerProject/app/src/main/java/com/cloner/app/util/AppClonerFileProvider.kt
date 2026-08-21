@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import java.io.File
@@ -64,14 +65,41 @@ class AppClonerFileProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     private fun getFileForUri(uri: Uri): File {
+        if (uri.authority != AUTHORITY) {
+            throw FileNotFoundException("Invalid provider authority")
+        }
         val path = uri.path ?: throw FileNotFoundException("Invalid URI: $uri")
-        // Cho phép đọc file từ đường dẫn
-        return File(path)
+        val requested = File(path).canonicalFile
+        val allowedRoots = mutableListOf<File>()
+        context?.let { appContext ->
+            allowedRoots.add(appContext.filesDir.canonicalFile)
+            allowedRoots.add(appContext.cacheDir.canonicalFile)
+            allowedRoots.add(appContext.noBackupFilesDir.canonicalFile)
+            appContext.getExternalFilesDirs(null).filterNotNull().forEach {
+                allowedRoots.add(it.canonicalFile)
+            }
+        }
+        // APK clone files are also stored in the app's dedicated public Downloads folder.
+        allowedRoots.add(
+            File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "AppCloner"
+            ).canonicalFile
+        )
+        val isAllowed = allowedRoots.any { root ->
+            requested == root || requested.path.startsWith(root.path + File.separator)
+        }
+        if (!isAllowed) {
+            throw FileNotFoundException("File nằm ngoài vùng chia sẻ được phép")
+        }
+        return requested
     }
 
     companion object {
+        private const val AUTHORITY = "com.cloner.app.fileprovider"
+
         fun getUriForFile(file: File): Uri {
-            return Uri.parse("content://com.cloner.app.fileprovider${file.absolutePath}")
+            return Uri.parse("content://$AUTHORITY${file.absolutePath}")
         }
     }
 }

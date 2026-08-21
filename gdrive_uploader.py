@@ -193,6 +193,21 @@ class GoogleDriveUploader:
             print(f"[API Error] {e.code}: {err_body}")
             return None
 
+    def find_existing_file(self, file_name, folder_id):
+        """Tìm file cùng tên trong đúng thư mục để watcher có tính idempotent."""
+        safe_name = file_name.replace("\\", "\\\\").replace("'", "\\'")
+        query = urllib.parse.quote(
+            f"name = '{safe_name}' and '{folder_id}' in parents and trashed = false"
+        )
+        url = (
+            "https://www.googleapis.com/drive/v3/files?"
+            f"q={query}&fields=files(id,name,size,md5Checksum,modifiedTime)&pageSize=100"
+        )
+        result = self.api_request(url)
+        if result and result.get("files"):
+            return result["files"][0]
+        return None
+
     def find_or_create_folder(self, folder_name):
         query = urllib.parse.quote(f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false")
         url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name)"
@@ -218,7 +233,7 @@ class GoogleDriveUploader:
         print(f"    [SubAI_Queue Folder ID]: {self.queue_folder_id}")
         print(f"    [SubAI_Done Folder ID]: {self.done_folder_id}")
 
-    def upload_file(self, file_path, folder_id, description=""):
+    def upload_file(self, file_path, folder_id, description="", replace_existing=False):
         if not os.path.exists(file_path):
             print(f"[!] File không tồn tại: {file_path}")
             return None
@@ -226,6 +241,36 @@ class GoogleDriveUploader:
         file_name = os.path.basename(file_path)
         file_size = os.path.getsize(file_path)
         mime_type = "video/mp4" if file_name.endswith(".mp4") else "application/json"
+
+        existing = self.find_existing_file(file_name, folder_id)
+        if existing and replace_existing:
+            print(f"--> Cập nhật file metadata đã có trên Drive: {file_name}")
+            update_url = (
+                "https://www.googleapis.com/upload/drive/v3/files/"
+                f"{existing['id']}?uploadType=media"
+            )
+            with open(file_path, "rb") as f:
+                file_data = f.read()
+            update_req = urllib.request.Request(
+                update_url,
+                data=file_data,
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Length": str(file_size),
+                    "Content-Type": mime_type,
+                },
+                method="PATCH",
+            )
+            try:
+                with urllib.request.urlopen(update_req):
+                    return existing["id"]
+            except Exception as e:
+                print(f"[!] Lỗi cập nhật file trên Drive: {e}")
+                return None
+
+        if existing and str(existing.get("size", "")) == str(file_size):
+            print(f"[OK] File đã tồn tại trên Drive, bỏ qua upload trùng: {file_name}")
+            return existing["id"]
 
         print(f"--> Đang tải lên Google Drive: {file_name} ({file_size:,} bytes)...")
 
@@ -293,7 +338,7 @@ class GoogleDriveUploader:
         with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
-        meta_id = self.upload_file(meta_file, self.queue_folder_id)
+        meta_id = self.upload_file(meta_file, self.queue_folder_id, replace_existing=True)
         try:
             os.remove(meta_file)
         except:
