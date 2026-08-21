@@ -1,6 +1,7 @@
 package com.cloner.app.gdrive
 
 import android.content.Context
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -17,6 +18,9 @@ import java.security.spec.PKCS8EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * DriveVideoItem: Thông tin video và metadata lưu trên Google Drive
@@ -32,7 +36,9 @@ data class DriveVideoItem(
     val suggestedTime: String,
     val modifiedTime: String,
     val metadataFileId: String = "",
-    val sourceParentId: String = ""
+    val sourceParentId: String = "",
+    val jobId: String = "",
+    val schemaVersion: Int = 0
 )
 
 /**
@@ -49,6 +55,7 @@ object GoogleDriveClient {
     private const val KEYSTORE_ALIAS = "gdrive_credentials_key"
     private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
     private const val DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+    private const val MAX_SUPPORTED_QUEUE_SCHEMA_VERSION = 1
 
     private var cachedToken: String? = null
     private var tokenExpiryEpoch: Long = 0L
@@ -335,7 +342,9 @@ object GoogleDriveClient {
             val fileId = video.optString("id")
             val fileName = video.optString("name")
             val record = metadataByVideoId[fileId] ?: metadataByName[fileName]
-            val meta = record?.json
+            val rawMeta = record?.json
+            val schemaVersion = rawMeta?.optInt("schema_version", 0) ?: 0
+            val meta = rawMeta?.takeIf { schemaVersion <= MAX_SUPPORTED_QUEUE_SCHEMA_VERSION }
             val title = meta?.optString("title")?.takeIf { it.isNotBlank() }
                 ?: fileName.substringBeforeLast('.', fileName)
             val description = video.optString("description", "")
@@ -359,7 +368,9 @@ object GoogleDriveClient {
                 suggestedTime = suggestedTime,
                 modifiedTime = video.optString("modifiedTime", ""),
                 metadataFileId = record?.driveFileId.orEmpty(),
-                sourceParentId = parentId
+                sourceParentId = parentId,
+                jobId = meta?.optString("job_id")?.takeIf { it.isNotBlank() }.orEmpty(),
+                schemaVersion = schemaVersion
             )
         }.distinctBy { it.fileId }
     }
@@ -488,6 +499,14 @@ object GoogleDriveClient {
             val pm = context.packageManager
             val installedApps = pm.getInstalledApplications(0)
             val clonesArray = JSONArray()
+            val deviceId = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ANDROID_ID
+            ).orEmpty()
+            val lastSeenAt = SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ssXXX",
+                Locale.US
+            ).format(Date())
 
             for (app in installedApps) {
                 val pkg = app.packageName
@@ -498,6 +517,8 @@ object GoogleDriveClient {
                         put("id", cloneId)
                         put("name", label)
                         put("package", pkg)
+                        put("device_id", deviceId)
+                        put("last_seen_at", lastSeenAt)
                     }
                     clonesArray.put(obj)
                 }

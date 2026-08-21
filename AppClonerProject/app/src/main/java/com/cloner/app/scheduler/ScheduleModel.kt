@@ -29,6 +29,7 @@ data class ScheduleTask(
     val targetPackageName: String,
     val targetAppName: String,
     val metadataFileId: String = "",
+    val jobId: String = "",
     var scheduledTimeMillis: Long,
     var status: ScheduleStatus = ScheduleStatus.PENDING,
     var progressPercent: Int = 0,
@@ -47,6 +48,7 @@ data class ScheduleTask(
         json.put("targetPackageName", targetPackageName)
         json.put("targetAppName", targetAppName)
         json.put("metadataFileId", metadataFileId)
+        json.put("jobId", jobId)
         json.put("scheduledTimeMillis", scheduledTimeMillis)
         json.put("status", status.name)
         json.put("progressPercent", progressPercent)
@@ -68,6 +70,7 @@ data class ScheduleTask(
                 targetPackageName = json.optString("targetPackageName", "com.ss.android.ugc.trill"),
                 targetAppName = json.optString("targetAppName", "TikTok"),
                 metadataFileId = json.optString("metadataFileId", ""),
+                jobId = json.optString("jobId", ""),
                 scheduledTimeMillis = json.getLong("scheduledTimeMillis"),
                 status = runCatching {
                     ScheduleStatus.valueOf(json.optString("status", "PENDING"))

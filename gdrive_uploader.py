@@ -20,6 +20,7 @@ import urllib.request
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
+from uuid import uuid4
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
@@ -28,6 +29,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 TOKEN_FILE = "gdrive_token.json"
 SCOPES = "https://www.googleapis.com/auth/drive"
+QUEUE_SCHEMA_VERSION = 1
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
@@ -325,6 +327,8 @@ class GoogleDriveUploader:
 
         base_name = os.path.splitext(os.path.basename(video_path))[0]
         meta = {
+            "schema_version": QUEUE_SCHEMA_VERSION,
+            "job_id": f"job-{uuid4().hex}",
             "video_file_id": video_id,
             "video_file_name": os.path.basename(video_path),
             "title": base_name,
@@ -332,7 +336,9 @@ class GoogleDriveUploader:
             "hashtags": hashtags,
             "target_clone": target_clone,
             "schedule_time": schedule_time,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "QUEUED",
+            "source": "subai-desktop-compat-uploader"
         }
         meta_file = f"{video_path}.json"
         with open(meta_file, "w", encoding="utf-8") as f:

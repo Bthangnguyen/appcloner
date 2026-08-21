@@ -670,6 +670,7 @@ class MainActivity : Activity() {
                 targetPackageName = targetPkg,
                 targetAppName = targetName,
                 metadataFileId = video.metadataFileId,
+                jobId = video.jobId,
                 scheduledTimeMillis = scheduledTime
             )
 

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://subai.local/contracts/drive-queue/v1/device-clones.schema.json",
+  "title": "SubAI installed TikTok clone registry",
+  "description": "Array written by an Android executor and read by the desktop UI.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["id", "name", "package"],
+    "properties": {
+      "id": { "type": "string", "minLength": 1 },
+      "name": { "type": "string" },
+      "package": { "type": "string", "minLength": 1 },
+      "device_id": { "type": "string" },
+      "last_seen_at": { "type": "string" },
+      "capabilities": { "type": "array", "items": { "type": "string" } }
+    },
+    "additionalProperties": true
+  }
+}
